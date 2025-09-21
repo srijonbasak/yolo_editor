@@ -10,6 +10,16 @@
 
 ---
 
+## 📷 Screenshots
+
+> Put your images in `assets/` and update the names if needed.
+
+![Main UI](assets/main_ui.png)
+![Editing Boxes](assets/editing_boxes.png)
+![Diagnostics](assets/diagnostics.png)
+
+---
+
 ## ✨ Highlights
 
 - **Open anything**
@@ -79,16 +89,17 @@ root/
   test/...
 YAML example (Ultralytics):
 
-yaml
-Copy code
-train: ../train/images
+```train: ../train/images
 val: ../valid/images
 test: ../test/images
 nc: 6
 names: ['APC-IFV', 'ART', 'CAR', 'MLRS', 'TANK', 'TRUCK']
-If those ../ paths don’t match your structure, the app auto-fallbacks to neighbors (e.g., tries train/images next to the YAML). Use File → Show Dataset Diagnostics to see exactly what it resolved and scanned.
+```
+        If those ../ paths don’t match your structure, the app auto-fallbacks to neighbors (e.g., tries train/images next to the YAML). Use File → Show Dataset Diagnostics to see exactly what it resolved and scanned.
+
 
 ⌨️ Shortcuts
+
 Add box: A
 
 Delete selected: Delete
@@ -104,11 +115,9 @@ Fit to window: F
 100% zoom: 1
 
 🛠️ Install & Run (from Source)
-Recommended build/runtime: Python 3.11 on Windows 64-bit.
 
-powershell
-Copy code
-# 1) Create and activate a venv (PowerShell)
+    Recommended build/runtime: Python 3.11 on Windows 64-bit.
+```# 1) Create and activate a venv (PowerShell)
 python -m venv .venv
 # If activation is blocked:
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
@@ -119,186 +128,7 @@ pip install -r requirements.txt
 
 # 3) Launch the app
 python -m yolo_editor.app
+```
 If you’re on Python 3.13 and hit a NumPy/OpenCV binary mismatch, pin:
-
-powershell
-Copy code
-pip install "opencv-python==4.9.0.80"
-📦 Build a Windows .exe
-Option A: PyInstaller (One-dir build recommended)
-Create a tiny launcher in project root:
-
-launcher.py
-
-python
-Copy code
-from yolo_editor.app import main
-if __name__ == "__main__":
-    main()
-Build:
-
-powershell
-Copy code
-# Clean build venv (recommended): Python 3.11
-py -3.11 -m venv .venv-build
-.\.venv-build\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install -r requirements.txt
-pip install pyinstaller==6.11
-
-# Build (onedir)
-pyinstaller ^
-  --name "YOLO Editor" ^
-  --windowed ^
-  --icon assets/app.ico ^
-  --collect-all PySide6 ^
-  --collect-submodules cv2 ^
-  launcher.py
-Result:
-
-text
-Copy code
-dist\YOLO Editor\YOLO Editor.exe
-One-file build is possible (--onefile) but starts slower (unpacks to temp). For end users, ship onedir inside an installer.
-
-Option B: Installer (Inno Setup)
-Install Inno Setup and use:
-
-installer.iss
-
-ini
-Copy code
-[Setup]
-AppName=YOLO Editor
-AppVersion=0.1.1
-DefaultDirName={autopf}\YOLO Editor
-DefaultGroupName=YOLO Editor
-OutputDir=installer
-OutputBaseFilename=YOLO-Editor-Setup
-Compression=lzma
-SolidCompression=yes
-ArchitecturesInstallIn64BitMode=x64
-
-[Files]
-Source: "dist\YOLO Editor\*"; DestDir: "{app}"; Flags: recursesubdirs
-
-[Icons]
-Name: "{group}\YOLO Editor"; Filename: "{app}\YOLO Editor.exe"
-Name: "{commondesktop}\YOLO Editor"; Filename: "{app}\YOLO Editor.exe"; Tasks: desktopicon
-
-[Tasks]
-Name: "desktopicon"; Description: "Create a &desktop icon"; GroupDescription: "Additional icons:"
-Build in Inno Setup → get:
-
-text
-Copy code
-installer\YOLO-Editor-Setup.exe
-On fresh Windows boxes, Qt may require the Microsoft Visual C++ Redistributable (x64).
-
-🚀 Usage
-Open a dataset
-
-File → Open Dataset Root… (pick folder containing train/, val/valid/, and/or test/), or
-
-File → Open Dataset YAML… (pick your data.yaml).
-
-Browse images from the left Files tree.
-
-Add a box (A), drag corners to resize, drag box to move.
-
-Pick a class from the dropdown, press C to set selected boxes to that class.
-
-Delete selected with Delete.
-
-Save anytime (S). Labels are written atomically (via *.tmp then replace).
-
-Right side shows:
-
-Labels (YOLO): exact file path + rows with name, id, cx, cy, w, h
-
-Dataset Stats: per-split image counts; per-class images & total boxes
-
-Diagnostics:
-File → Show Dataset Diagnostics prints detected YAML path(s), resolved directories, and “scanned” lines with counts—great when paths are weird.
-
-🔁 Class Remapping (merge two datasets)
-Planned/extension module; concept already designed:
-
-Define a mapping (e.g., 13 original classes → 7 final classes).
-
-Unused classes map to drop (e.g., -1) or a fallback class.
-
-Batch apply mapping across splits; rewrite all label files.
-
-Export a new dataset folder with:
-
-remapped label txt files,
-
-copied/linked images (configurable),
-
-updated data.yaml with nc and names.
-
-🧩 Tech Notes
-PySide6 (Qt) for native UI/graphics scene
-
-OpenCV for robust image IO (RGB conversion)
-
-PyYAML for YAML parsing
-
-Crash-safe image loading: .copy() the QImage to avoid lifespan issues when wrapping NumPy buffers
-
-Robust path resolver: tries primary YAML, then smart fallbacks (relative to YAML, stripping ../, canonical neighbors), and supports multiple split layouts
-
-🐞 Troubleshooting
-App closes immediately → run from PowerShell to see traceback:
-
-powershell
-Copy code
-python -m yolo_editor.app
-Common fixes:
-
-Ensure deps installed: pip install -r requirements.txt
-
-On Python 3.13, pin OpenCV: pip install "opencv-python==4.9.0.80"
-
-“No images detected” → use Show Dataset Diagnostics. Check:
-
-The train/val/test paths it resolved
-
-Whether it scanned …/images or the split folder itself
-
-If YAML has ../, verify actual folder structure (fallbacks may fix automatically)
-
-Qt platform plugin error (in packaged exe) → build with --collect-all PySide6.
-
-OpenCV import error → include --collect-submodules cv2 in PyInstaller command.
-
-Can’t activate venv (execution policy) →
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-
-🗺️ Roadmap
-Class remapping UI + export new dataset
-
-Multi-select transforms (scale/align)
-
-Edge handles & keyboard nudging (Shift/Alt + arrows)
-
-COCO export
-
-Undo/redo stack for edits
-
-Bulk operations (move/rename images, validate empty/missing labels)
-
-📄 License
-r
-Copy code
-MIT License — Copyright (c) 2025 Srijon Basak
-👤 Author
-Built by Srijon Basak — srijonbasak76@gmail.com.
-Found a bug or want a feature? Open an issue or reach out!
-
-makefile
-Copy code
-::contentReference[oaicite:0]{index=0}
-
-
+```pip install "opencv-python==4.9.0.80"
+```
