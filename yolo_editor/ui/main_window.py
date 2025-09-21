@@ -580,7 +580,7 @@ class MainWindow(QMainWindow):
         pos = QPointF(900 + 20 * len(self.merge_canvas.target_nodes), 60)
         self.merge_canvas.spawn_target_node(tid, name, quota, pos)
 
-    # ---------- Export merged dataset ----------
+    # ---------- Export merged dataset (FIXED: no label loss; robust quotas; clean YAML) ----------
     def _merge_export(self):
         if not self.merge_ctrl.model.targets:
             QMessageBox.warning(self, "Nothing to export", "Create at least one target class and connect sources.")
@@ -590,28 +590,41 @@ class MainWindow(QMainWindow):
             return
         out = Path(out_dir)
 
-        # mapping: (dataset_id, class_id) -> target_id
-        edges = [(e.source_key[0], e.source_key[1], e.target_id) for e in self.merge_ctrl.model.edges]
-        if not edges:
+        # Build mapping (dataset, src_class) -> target_id
+        src2tgt: Dict[Tuple[str, int], int] = {}
+        for e in self.merge_ctrl.model.edges:
+            src2tgt[(e.source_key[0], e.source_key[1])] = e.target_id
+        if not src2tgt:
             QMessageBox.warning(self, "No connections", "Connect at least one source class to a target class.")
             return
 
-        # Build selections with quotas
-        # For each target class, compute planned allocation per source
-        planned: Dict[int, Dict[Tuple[str,int], int]] = {}
+        # Planned quotas per target (total IMAGES for that target)
+        quotas: Dict[int, int] = {}
         for tid in self.merge_ctrl.model.targets.keys():
-            planned[tid] = self.merge_ctrl.planned_allocation(tid)
+            # sum the per-source allocations -> target total
+            alloc = self.merge_ctrl.planned_allocation(tid)
+            quotas[tid] = sum(int(n) for n in alloc.values()) if alloc else 0
+            # 0 means unlimited
+        # Track achieved counts per target
+        picked_per_target: Dict[int, int] = {tid: 0 for tid in self.merge_ctrl.model.targets.keys()}
 
-        # Helper: ensure split folders
+        # Ensure split dirs in output
         def ensure_split_dirs(base: Path, split: str):
             (base / split / "images").mkdir(parents=True, exist_ok=True)
             (base / split / "labels").mkdir(parents=True, exist_ok=True)
-
         for sp in ("train", "val", "test"):
             ensure_split_dirs(out, sp)
 
-        # Copy & rewrite labels
-        used_names: Set[str] = set()  # avoid image name clashes
+        # Build dataset lookups
+        per_dataset = {}
+        for ds_name, info in self.loaded_datasets.items():
+            d = {}
+            for sp, spinfo in info["splits"].items():
+                d[sp] = (spinfo["images"], spinfo["labels_dir"])
+            per_dataset[ds_name] = d
+
+        # Helper to avoid name clashes
+        used_names: Set[str] = set()
         def copy_unique(src_img: Path, dst_img_dir: Path, prefix: str) -> Path:
             stem = f"{prefix}_{src_img.stem}"
             name = stem + src_img.suffix
@@ -624,74 +637,89 @@ class MainWindow(QMainWindow):
             shutil.copy2(src_img, dst)
             return dst
 
-        # Build quick lookups
-        # dataset -> split -> list[Path], labels_dir
-        # and per-image boxes
-        per_dataset = {}
-        for ds_name, info in self.loaded_datasets.items():
-            d = {}
-            for sp, spinfo in info["splits"].items():
-                lbl_dir = spinfo["labels_dir"]
-                imgs = spinfo["images"]
-                d[sp] = (imgs, lbl_dir)
-            per_dataset[ds_name] = d
+        # Pass 1: iterate all images, compute mapped boxes per image (across ALL targets)
+        # Also record which targets each image contributes to.
+        class ImageEntry:
+            __slots__ = ("src_img", "src_ds", "src_split", "mapped_boxes", "targets_hit")
+            def __init__(self, src_img: Path, src_ds: str, src_split: str):
+                self.src_img = src_img
+                self.src_ds = src_ds
+                self.src_split = src_split
+                self.mapped_boxes: List[Box] = []
+                self.targets_hit: Set[int] = set()
 
-        # Select and export
-        for tid, tgt in self.merge_ctrl.model.targets.items():
-            # For each connected source, iterate images and pick those that contain the class
-            alloc = planned.get(tid, {})
-            for (ds_name, cid), quota in alloc.items():
-                if quota <= 0:
+        candidates: List[ImageEntry] = []
+        for ds_name, splits in per_dataset.items():
+            for sp_key in ("train", "val", "test", "eval"):
+                if sp_key not in splits:
                     continue
-                ds_splits = per_dataset.get(ds_name, {})
-                remaining = quota
-                for sp_key in ("train", "val", "test", "eval"):
-                    if remaining <= 0:
-                        break
-                    if sp_key not in ds_splits:
+                imgs, lbl_dir = splits[sp_key]
+                for img in imgs:
+                    txt = _label_path_for(img, lbl_dir)
+                    if not txt.exists():
                         continue
-                    imgs, lbl_dir = ds_splits[sp_key]
-                    # export split rule: eval → val
-                    out_split = "val" if sp_key in ("val", "eval") else sp_key
-                    for img in imgs:
-                        if remaining <= 0:
-                            break
-                        txt = _label_path_for(img, lbl_dir)
-                        if not txt.exists():
-                            continue
-                        keep_boxes: List[Box] = []
-                        has_class = False
-                        for b in read_yolo_txt(txt):
-                            # Only keep boxes that are mapped to *some* target id.
-                            new_tid = None
-                            # check if this (ds,cid_src) is mapped; if so, convert exactly those
-                            if b.cls == cid:
-                                new_tid = tid
-                                has_class = True
-                            else:
-                                # check if this class is mapped somewhere else; if not, drop
-                                pass
-                            if new_tid is not None:
-                                keep_boxes.append(Box(cls=new_tid, cx=b.cx, cy=b.cy, w=b.w, h=b.h))
-                        if not has_class:
-                            continue
-                        # Copy image and write label (drop empty)
-                        dst_img = copy_unique(img, out / out_split / "images", prefix=ds_name)
-                        dst_txt = (out / out_split / "labels" / dst_img.stem).with_suffix(".txt")
-                        if keep_boxes:
-                            write_yolo_txt(dst_txt, keep_boxes)
-                        else:
-                            # drop empty files: ensure no label is written
-                            if dst_txt.exists():
-                                dst_txt.unlink(missing_ok=True)
-                        remaining -= 1
+                    mapped: List[Box] = []
+                    targets_here: Set[int] = set()
+                    for b in read_yolo_txt(txt):
+                        key = (ds_name, int(b.cls))
+                        if key in src2tgt:
+                            tid = src2tgt[key]
+                            mapped.append(Box(cls=tid, cx=b.cx, cy=b.cy, w=b.w, h=b.h))
+                            targets_here.add(tid)
+                    if mapped:
+                        ent = ImageEntry(img, ds_name, sp_key)
+                        ent.mapped_boxes = mapped
+                        ent.targets_hit = targets_here
+                        candidates.append(ent)
+
+        if not candidates:
+            QMessageBox.warning(self, "No matches", "No images contain mapped classes.")
+            return
+
+        # Pass 2: greedy pick images to satisfy per-target quotas.
+        # An image that hits multiple targets helps all of them at once.
+        selected: List[ImageEntry] = []
+        for ent in candidates:
+            if not ent.targets_hit:
+                continue
+            # If all targets this image would help are already at/over quota, skip.
+            needs = [
+                tid for tid in ent.targets_hit
+                if quotas.get(tid, 0) == 0 or picked_per_target.get(tid, 0) < quotas.get(tid, 0)
+            ]
+            if not needs:
+                continue
+            selected.append(ent)
+            # credit all targets it contributes to
+            for tid in ent.targets_hit:
+                if quotas.get(tid, 0) != 0:
+                    picked_per_target[tid] = picked_per_target.get(tid, 0) + 1
+
+            # Optional early break if ALL targets with nonzero quotas are satisfied
+            all_ok = True
+            for tid, q in quotas.items():
+                if q != 0 and picked_per_target.get(tid, 0) < q:
+                    all_ok = False
+                    break
+            if all_ok:
+                break
+
+        # Pass 3: copy each selected image ONCE and write ALL mapped boxes in it
+        for ent in selected:
+            out_split = "val" if ent.src_split in ("val", "eval") else ent.src_split
+            dst_img = copy_unique(ent.src_img, out / out_split / "images", prefix=ent.src_ds)
+            dst_txt = (out / out_split / "labels" / dst_img.stem).with_suffix(".txt")
+            if ent.mapped_boxes:
+                write_yolo_txt(dst_txt, ent.mapped_boxes)
+            else:
+                if dst_txt.exists():
+                    dst_txt.unlink(missing_ok=True)
 
         # Write data.yaml (names = target order by id)
         names_vec = [None] * (max(self.merge_ctrl.model.targets.keys()) + 1)
         for tid, tcls in self.merge_ctrl.model.targets.items():
             if tid < len(names_vec):
                 names_vec[tid] = tcls.class_name
-        # fill holes if any
         names_vec = [n if n is not None else f"class_{i}" for i, n in enumerate(names_vec)]
         y = {
             "train": "train/images",

@@ -1,13 +1,15 @@
+# yolo_editor/ui/merge_designer/node.py
 from __future__ import annotations
-from typing import Callable, Optional, Tuple, List
+from typing import Callable, Optional, List
 from PySide6.QtWidgets import (
     QGraphicsItem, QGraphicsRectItem, QGraphicsSimpleTextItem, QGraphicsEllipseItem,
-    QGraphicsProxyWidget, QPushButton, QMenu, QAction
+    QGraphicsProxyWidget, QPushButton, QMenu
 )
-from PySide6.QtGui import QBrush, QPen, QColor, QCursor
+from PySide6.QtGui import QBrush, QPen, QColor, QCursor, QAction  # QAction is in QtGui on Qt6
 from PySide6.QtCore import QRectF, QPointF, Qt
 
 PORT_R = 6.0
+
 
 class Port(QGraphicsEllipseItem):
     """
@@ -15,7 +17,7 @@ class Port(QGraphicsEllipseItem):
     role: "source" or "target"
     """
     def __init__(self, parent: QGraphicsItem, role: str, key):
-        super().__init__(-PORT_R, -PORT_R, 2*PORT_R, 2*PORT_R, parent)
+        super().__init__(-PORT_R, -PORT_R, 2 * PORT_R, 2 * PORT_R, parent)
         self.setBrush(QBrush(QColor("#ffffff")))
         self.setPen(QPen(QColor("#444"), 1.5))
         self.setZValue(2)
@@ -24,11 +26,13 @@ class Port(QGraphicsEllipseItem):
         self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsScenePositionChanges)
 
+
 class ClassBlock(QGraphicsRectItem):
     """
     Visual block line: label + counts + a port (left for source, right for target).
     """
-    def __init__(self, w: float, h: float, text: str, subtext: str = "", role: str = "source", key=None, color="#efefef"):
+    def __init__(self, w: float, h: float, text: str, subtext: str = "",
+                 role: str = "source", key=None, color: str = "#efefef"):
         super().__init__(0, 0, w, h)
         self.setBrush(QBrush(QColor(color)))
         self.setPen(QPen(QColor("#c9c9c9"), 1))
@@ -41,9 +45,9 @@ class ClassBlock(QGraphicsRectItem):
         # port
         self.port = Port(self, role=role, key=key)
         if role == "source":
-            self.port.setPos(6, h/2)
+            self.port.setPos(6, h / 2)
         else:
-            self.port.setPos(w-6, h/2)
+            self.port.setPos(w - 6, h / 2)
 
     def set_subtext(self, s: str):
         self.subtitle.setText(s)
@@ -52,6 +56,7 @@ class ClassBlock(QGraphicsRectItem):
     def _layout(self):
         self.title.setPos(10, 6)
         self.subtitle.setPos(10, 6 + 16)
+
 
 class NodeItem(QGraphicsRectItem):
     """
@@ -115,7 +120,7 @@ class NodeItem(QGraphicsRectItem):
     # Context menu hook (node removal is handled by canvas)
     def contextMenuEvent(self, event):
         m = QMenu()
-        act_del = QAction("Remove node")
+        act_del = QAction("Remove node", m)
         m.addAction(act_del)
         chosen = m.exec(event.screenPos().toPoint())
         if chosen == act_del:
