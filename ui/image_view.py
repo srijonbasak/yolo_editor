@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QPixmap, QPen, QBrush, QPainter
+from PySide6.QtGui import QPixmap, QPen, QBrush
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem
 )
@@ -68,7 +68,7 @@ class BBoxItem(QGraphicsRectItem):
 class ImageView(QGraphicsView):
     def __init__(self, scene: ImageScene):
         super().__init__(scene)
-        self.setRenderHints(self.renderHints() | QPainter.SmoothPixmapTransform | QPainter.Antialiasing)
+        self.setRenderHints(self.renderHints() | self.RenderHint.SmoothPixmapTransform | self.RenderHint.Antialiasing)
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
 
