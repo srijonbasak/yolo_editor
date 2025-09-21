@@ -1,20 +1,41 @@
 from __future__ import annotations
-from typing import List, Dict
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem, QPushButton, QHBoxLayout, QSpinBox, QLineEdit
+from typing import List
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem,
+    QPushButton, QHBoxLayout, QSpinBox, QLineEdit
+)
+from PySide6.QtCore import Signal
+
 
 class MergePalette(QWidget):
     """
-    Left panel listing:
-    - available datasets (from the app)
-    - target ops: add target class with optional quota
-    Emits callbacks provided by MainWindow to spawn nodes.
+    Left panel:
+      - Load Dataset... (opens folder/yaml)
+      - Datasets list + "Add to Canvas"
+      - New Target Class (name + optional quota)
+      - Export Merged...
+    Emits signals for the MainWindow to perform actions.
     """
+    requestLoadDataset = Signal()
+    requestExportMerged = Signal()
+
     def __init__(self, on_spawn_dataset, on_spawn_target_class):
         super().__init__()
         self._on_spawn_dataset = on_spawn_dataset
         self._on_spawn_target_class = on_spawn_target_class
 
         lay = QVBoxLayout(self)
+
+        # Top controls
+        top_row = QHBoxLayout()
+        self.btn_load = QPushButton("Load Dataset…")
+        self.btn_load.clicked.connect(lambda: self.requestLoadDataset.emit())
+        self.btn_export = QPushButton("Export Merged…")
+        self.btn_export.clicked.connect(lambda: self.requestExportMerged.emit())
+        top_row.addWidget(self.btn_load)
+        top_row.addWidget(self.btn_export)
+        lay.addLayout(top_row)
+
         lay.addWidget(QLabel("Datasets"))
         self.list = QListWidget()
         lay.addWidget(self.list)
