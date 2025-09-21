@@ -50,7 +50,7 @@
 
 All of these work:
 
-```text
+
 A) images/<split> and labels/<split>
 root/
   images/
