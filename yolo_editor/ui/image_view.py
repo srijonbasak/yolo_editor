@@ -4,7 +4,7 @@ from typing import List, Optional, Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
-from PySide6.QtGui import QPixmap, QImage, QPen, QBrush, QAction
+from PySide6.QtGui import QPixmap, QImage, QPen, QBrush, QAction, QPainter
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem,
     QGraphicsItem, QWidget, QMenu
@@ -35,21 +35,6 @@ class Box:
         hh = r.height() / h_img
         return Box(cls=cls, cx=float(cx), cy=float(cy), w=float(ww), h=float(hh))
 
-class Handle(QGraphicsRectItem):
-    def __init__(self, parent_rect: "BBoxItem", pos: str, size: float = 8.0):
-        super().__init__(-size/2, -size/2, size, size, parent_rect)
-        self.setBrush(QBrush(Qt.white))
-        self.setPen(QPen(Qt.black, 1))
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
-        self.setZValue(10)
-        self.pos_id = pos
-        self.parent_rect = parent_rect
-    def itemChange(self, change, value):
-        if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
-            self.parent_rect.on_handle_moved(self)
-        return super().itemChange(change, value)
-
 class BBoxItem(QGraphicsRectItem):
     def __init__(self, rect: QRectF, cls: int, color=Qt.red):
         super().__init__(rect)
@@ -61,37 +46,86 @@ class BBoxItem(QGraphicsRectItem):
         self.setPen(QPen(color, 2))
         self.setBrush(QBrush(Qt.transparent))
         self.cls = cls
-        self._handles = {pid: Handle(self, pid) for pid in ("tl","tr","bl","br")}
+
+        # guard to avoid infinite recursion when we reposition handles ourselves
+        self._suppress_handle_feedback: bool = False
+
+        # Create 4 corner handles
+        self._handles: dict[str, Handle] = {}
+        for pid in ("tl", "tr", "bl", "br"):
+            h = Handle(self, pid)
+            self._handles[pid] = h
         self.update_handles()
-    def on_handle_moved(self, handle: Handle):
+
+    def on_handle_moved(self, handle: "Handle"):
+        """Called when a user drags a corner handle; update the rect."""
         r = self.rect()
         p = handle.pos()
         if handle.pos_id == "tl":
-            new = QRectF(p.x(), p.y(), r.right()-p.x(), r.bottom()-p.y())
+            new = QRectF(p.x(), p.y(), r.right() - p.x(), r.bottom() - p.y())
         elif handle.pos_id == "tr":
-            new = QRectF(r.left(), p.y(), p.x()-r.left(), r.bottom()-p.y())
+            new = QRectF(r.left(), p.y(), p.x() - r.left(), r.bottom() - p.y())
         elif handle.pos_id == "bl":
-            new = QRectF(p.x(), r.top(), r.right()-p.x(), p.y()-r.top())
-        else:
-            new = QRectF(r.left(), r.top(), p.x()-r.left(), p.y()-r.top())
-        if new.width() < 1: new.setWidth(1)
+            new = QRectF(p.x(), r.top(), r.right() - p.x(), p.y() - r.top())
+        else:  # "br"
+            new = QRectF(r.left(), r.top(), p.x() - r.left(), p.y() - r.top())
+
+        # enforce minimum size
+        if new.width() < 1:  new.setWidth(1)
         if new.height() < 1: new.setHeight(1)
-        self.setRect(new.normalized()); self.update_handles()
+
+        # Update rect and reposition handles WITHOUT sending feedback back from the handles
+        self.setRect(new.normalized())
+        self._suppress_handle_feedback = True
+        try:
+            self.update_handles()
+        finally:
+            self._suppress_handle_feedback = False
+
     def itemChange(self, change, value):
+        # Keep handles in place when the whole rect is moved/selected/transformed
         if change in (
             QGraphicsItem.GraphicsItemChange.ItemPositionChange,
             QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged,
             QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged,
             QGraphicsItem.GraphicsItemChange.ItemTransformHasChanged
         ):
-            self.update_handles()
+            self._suppress_handle_feedback = True
+            try:
+                self.update_handles()
+            finally:
+                self._suppress_handle_feedback = False
         return super().itemChange(change, value)
+
     def update_handles(self):
+        """Reposition corner handles to rect corners."""
         r = self.rect()
+        # Move handles programmatically; their itemChange will fire,
+        # but Handle.itemChange checks parent._suppress_handle_feedback.
         self._handles["tl"].setPos(r.topLeft())
         self._handles["tr"].setPos(r.topRight())
         self._handles["bl"].setPos(r.bottomLeft())
         self._handles["br"].setPos(r.bottomRight())
+
+class Handle(QGraphicsRectItem):
+    def __init__(self, parent_rect: BBoxItem, pos: str, size: float = 8.0):
+        super().__init__(-size/2, -size/2, size, size, parent_rect)
+        self.setBrush(QBrush(Qt.white))
+        self.setPen(QPen(Qt.black, 1))
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
+        self.setZValue(10)
+        self.pos_id = pos
+        self.parent_rect = parent_rect
+
+    def itemChange(self, change, value):
+        # When we are moved by the user, tell the parent to reshape the bbox.
+        # But if parent is currently updating us programmatically, do nothing.
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange:
+            if not self.parent_rect._suppress_handle_feedback:
+                # Call parent to recompute the bbox
+                self.parent_rect.on_handle_moved(self)
+        return super().itemChange(change, value)
 
 class ImageView(QGraphicsView):
     requestPrev = Signal()
@@ -102,7 +136,7 @@ class ImageView(QGraphicsView):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setRenderHints(self.renderHints() | self.RenderHint.Antialiasing | self.RenderHint.SmoothPixmapTransform)
+        self.setRenderHints(self.renderHints() | QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)

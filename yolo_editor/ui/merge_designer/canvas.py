@@ -1,26 +1,22 @@
 from __future__ import annotations
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsView, QGraphicsScene, QGraphicsSimpleTextItem, QGraphicsLineItem
-from PySide6.QtGui import QPen, QColor
+from PySide6.QtGui import QPen, QColor, QPainter  # <-- added QPainter
 from PySide6.QtCore import QPointF
 
 class MappingCanvas(QWidget):
-    """
-    Read-only mapping visualizer:
-      - Source datasets/classes on the left
-      - Target classes on the right
-      - Lines indicate mapping edges
-    """
     def __init__(self, parent=None):
         super().__init__(parent)
         lay = QVBoxLayout(self)
         self.view = QGraphicsView()
         self.scene = QGraphicsScene(self)
         self.view.setScene(self.scene)
-        self.view.setRenderHints(self.view.renderHints() | self.view.RenderHint.Antialiasing)
+        # FIX: use QPainter flags
+        self.view.setRenderHints(self.view.renderHints() | QPainter.Antialiasing)
         lay.addWidget(self.view)
-        self.sources = []   # list[(dsid, [(cid, name),...])]
-        self.targets = []   # list[(tid, name)]
-        self.edges   = []   # list[((dsid,cid), tid)]
+        self.sources = []
+        self.targets = []
+        self.edges   = []
+
 
     def set_data(self, sources, targets, edges):
         self.sources = sources
