@@ -28,6 +28,9 @@ class MergeCanvas(QWidget):
         self.scene = MergeScene(self)
         self.view.setScene(self.scene)
         lay.addWidget(self.view)
+        
+        # Set up scene bounds for proper mouse interaction
+        self.scene.setSceneRect(-1000, -1000, 2000, 2000)
 
         # bookkeeping
         self.nodes: Dict[str, NodeItem] = {}        # dataset nodes

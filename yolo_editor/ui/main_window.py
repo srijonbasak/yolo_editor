@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 # keep your existing image view
-from .image_view import ImageView
+from .image_view import ImageView, Box as ViewBox
 
 # NEW helpers
 from ..core.dataset_resolver import resolve_dataset, DatasetModel
@@ -48,8 +48,8 @@ class MainWindow(QMainWindow):
             self.merge_ctrl = MergeController()
             self.merge_canvas = MergeCanvas(self.merge_ctrl)
             self.merge_palette = MergePalette(
-                on_spawn_dataset=lambda _: None,  # you can wire later
-                on_spawn_target_class=lambda *_: None
+                on_spawn_dataset=self._spawn_dataset_node,
+                on_spawn_target_class=self._spawn_target_node
             )
             sp = QSplitter(Qt.Orientation.Horizontal)
             sp.addWidget(self.merge_palette); sp.addWidget(self.merge_canvas); sp.setStretchFactor(1, 1)
@@ -170,6 +170,10 @@ class MainWindow(QMainWindow):
         # default split
         if dm.ordered_splits():
             self._on_split_changed(dm.ordered_splits()[0])
+        
+        # Update merge palette if available
+        if hasattr(self, 'merge_palette'):
+            self.merge_palette.populate([name])
 
     # ---------------- Split / file tree ----------------
 
@@ -206,11 +210,12 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"Failed to load: {img_path.name}", 4000)
             return
         self.view.show_image_bgr(img_path, img)
-        boxes = read_yolo_txt(labels_for_image(img_path, self.labels_dir))
+        core_boxes = read_yolo_txt(labels_for_image(img_path, self.labels_dir))
         self.view.clear_boxes()
-        for b in boxes:
-            self.view.add_box_norm(b)
-        self._fill_table(boxes)
+        view_boxes = [ViewBox(cls=b.cls, cx=b.cx, cy=b.cy, w=b.w, h=b.h) for b in core_boxes]
+        for vb in view_boxes:
+            self.view.add_box_norm(vb)
+        self._fill_table(view_boxes)
         self.idx = i
         self._highlight_tree_row(i)
         self.statusBar().showMessage(f"{img_path.name}  ({i+1}/{len(self.images)})", 4000)
@@ -225,7 +230,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Saved: {txt}", 4000)
         self._compute_stats_and_show()
 
-    def _fill_table(self, boxes: List[Box]):
+    def _fill_table(self, boxes: List[ViewBox]):
         self.tbl.setRowCount(0)
         for b in boxes:
             r = self.tbl.rowCount(); self.tbl.insertRow(r)
@@ -241,7 +246,8 @@ class MainWindow(QMainWindow):
         if self.idx < 0:
             return
         boxes = self.view.get_boxes_as_norm()
-        self._fill_table(boxes)
+        view_boxes = [ViewBox(cls=b.cls, cx=b.cx, cy=b.cy, w=b.w, h=b.h) for b in boxes]
+        self._fill_table(view_boxes)
 
     def _highlight_tree_row(self, idx: int):
         root = self.file_tree.topLevelItem(0)
@@ -292,3 +298,53 @@ class MainWindow(QMainWindow):
                 lines.append(f"    labels: {label_text}")
                 lines.append(f"    image count: {count}")
         QMessageBox.information(self, "Dataset diagnostics", "\n".join(lines))
+
+    # ---------------- Merge Designer ----------------
+    
+    def _spawn_dataset_node(self, dataset_name: str):
+        """Spawn a dataset node on the merge canvas"""
+        if not hasattr(self, 'merge_canvas') or not hasattr(self, 'merge_ctrl'):
+            return
+        
+        # Find the dataset in our loaded datasets
+        if not self.dm or dataset_name not in [self.ds_name]:
+            QMessageBox.warning(self, "Dataset not found", f"Dataset '{dataset_name}' is not currently loaded.")
+            return
+        
+        # Create source classes from the current dataset
+        from collections import defaultdict
+        per_imgs = defaultdict(int)
+        per_boxes = defaultdict(int)
+        
+        for img in self.images:
+            seen = set()
+            for b in read_yolo_txt(labels_for_image(img, self.labels_dir)):
+                per_boxes[b.cls] += 1
+                seen.add(b.cls)
+            for c in seen:
+                per_imgs[c] += 1
+        
+        # Create SourceClass objects
+        from .merge_designer.controller import SourceClass
+        source_classes = []
+        for cls_id in sorted(set(per_imgs.keys()) | set(per_boxes.keys())):
+            name = self.names[cls_id] if 0 <= cls_id < len(self.names) else str(cls_id)
+            source_classes.append(SourceClass(
+                dataset_id=dataset_name,
+                class_id=cls_id,
+                class_name=name,
+                images=per_imgs.get(cls_id, 0),
+                boxes=per_boxes.get(cls_id, 0)
+            ))
+        
+        # Add to controller and spawn on canvas
+        self.merge_ctrl.upsert_dataset(dataset_name, source_classes)
+        self.merge_canvas.spawn_dataset_node(dataset_name, source_classes)
+    
+    def _spawn_target_node(self, name: str, quota: int = None):
+        """Spawn a target node on the merge canvas"""
+        if not hasattr(self, 'merge_canvas') or not hasattr(self, 'merge_ctrl'):
+            return
+        
+        target_id = self.merge_ctrl.add_target_class(name, quota)
+        self.merge_canvas.spawn_target_node(target_id, name, quota)

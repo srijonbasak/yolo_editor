@@ -17,7 +17,7 @@ from ...core.report import write_report
 from ...core.quality.dups import phash_hex, too_similar
 from ...core.quality.filters import load_bgr, blur_score, exposure_score, meets_min_resolution
 from .preview_panel import PreviewPanel
-from .canvas import MappingCanvas
+from .canvas import MergeCanvas as MappingCanvas
 
 EdgeKey = Tuple[str, int]  # (dataset_id, class_id)
 

@@ -24,9 +24,17 @@ class Box:
     w: float
     h: float
     def to_rect(self, w_img: int, h_img: int) -> QRectF:
+        # Convert normalized YOLO coordinates to screen coordinates
         x = (self.cx - self.w / 2) * w_img
         y = (self.cy - self.h / 2) * h_img
-        return QRectF(x, y, self.w * w_img, self.h * h_img)
+        width = self.w * w_img
+        height = self.h * h_img
+        
+        # Ensure minimum size to avoid horizontal lines
+        width = max(width, 2)
+        height = max(height, 2)
+        
+        return QRectF(x, y, width, height)
     @staticmethod
     def from_rect(cls: int, r: QRectF, w_img: int, h_img: int) -> "Box":
         cx = (r.x() + r.width()/2) / w_img
@@ -37,7 +45,14 @@ class Box:
 
 class BBoxItem(QGraphicsRectItem):
     def __init__(self, rect: QRectF, cls: int, color=Qt.red, on_change: Optional[Callable[[], None]] = None):
-        super().__init__(rect)
+        scene_rect = rect.normalized()
+        # Ensure minimum size to avoid horizontal lines
+        width = max(scene_rect.width(), 2)
+        height = max(scene_rect.height(), 2)
+        
+        # Create the rectangle directly with proper coordinates
+        super().__init__(scene_rect.x(), scene_rect.y(), width, height)
+        
         self._on_change = on_change
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
@@ -58,34 +73,44 @@ class BBoxItem(QGraphicsRectItem):
             self._handles[pid] = h
         self.update_handles()
 
+    def _set_scene_rect(self, scene_rect: QRectF):
+        scene_rect = scene_rect.normalized()
+        self.prepareGeometryChange()
+        # Ensure minimum size to avoid horizontal lines
+        w = max(scene_rect.width(), 2)
+        h = max(scene_rect.height(), 2)
+        # Set the rectangle directly with proper coordinates
+        self.setRect(scene_rect.x(), scene_rect.y(), w, h)
+        self.update_handles()
+
     def on_handle_moved(self, handle: "Handle"):
         """Called when a user drags a corner handle; update the rect."""
-        r = self.rect()
-        p = handle.pos()
+        scene_rect = self.mapRectToScene(self.rect())
+        handle_scene = handle.mapToScene(QPointF(0, 0))
         if handle.pos_id == "tl":
-            new = QRectF(p.x(), p.y(), r.right() - p.x(), r.bottom() - p.y())
+            fixed = scene_rect.bottomRight()
         elif handle.pos_id == "tr":
-            new = QRectF(r.left(), p.y(), p.x() - r.left(), r.bottom() - p.y())
+            fixed = scene_rect.bottomLeft()
         elif handle.pos_id == "bl":
-            new = QRectF(p.x(), r.top(), r.right() - p.x(), p.y() - r.top())
+            fixed = scene_rect.topRight()
         else:  # "br"
-            new = QRectF(r.left(), r.top(), p.x() - r.left(), p.y() - r.top())
+            fixed = scene_rect.topLeft()
 
-        # enforce minimum size
-        if new.width() < 1:  new.setWidth(1)
-        if new.height() < 1: new.setHeight(1)
+        new_scene = QRectF(handle_scene, fixed).normalized()
+        # Ensure minimum size to avoid horizontal lines
+        if new_scene.width() < 2:
+            new_scene.setWidth(2)
+        if new_scene.height() < 2:
+            new_scene.setHeight(2)
 
-        # Update rect and reposition handles WITHOUT sending feedback back from the handles
-        self.setRect(new.normalized())
         self._suppress_handle_feedback = True
         try:
-            self.update_handles()
+            self._set_scene_rect(new_scene)
         finally:
             self._suppress_handle_feedback = False
         self._emit_change()
 
     def itemChange(self, change, value):
-        # Keep handles in place when the whole rect is moved/selected/transformed
         if change in (
             QGraphicsItem.GraphicsItemChange.ItemPositionChange,
             QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged,
@@ -106,10 +131,7 @@ class BBoxItem(QGraphicsRectItem):
         return result
 
     def update_handles(self):
-        """Reposition corner handles to rect corners."""
         r = self.rect()
-        # Move handles programmatically; their itemChange will fire,
-        # but Handle.itemChange checks parent._suppress_handle_feedback.
         self._handles["tl"].setPos(r.topLeft())
         self._handles["tr"].setPos(r.topRight())
         self._handles["bl"].setPos(r.bottomLeft())
@@ -118,6 +140,7 @@ class BBoxItem(QGraphicsRectItem):
     def _emit_change(self):
         if self._on_change:
             self._on_change()
+
 
 class Handle(QGraphicsRectItem):
     def __init__(self, parent_rect: BBoxItem, pos: str, size: float = 8.0):
@@ -180,12 +203,26 @@ class ImageView(QGraphicsView):
         self.img_w, self.img_h = qimg.width(), qimg.height()
         pix = QPixmap.fromImage(qimg)
         self.img_item = self.scene.addPixmap(pix)
+        # Ensure image is positioned at (0,0) in the scene
+        self.img_item.setPos(0, 0)
         self.image_path = Path(path)
         self.fitInView(self.img_item, Qt.AspectRatioMode.KeepAspectRatio)
+        
+        # Update scene rect to match the image
+        self.scene.setSceneRect(0, 0, self.img_w, self.img_h)
 
-    def add_box_norm(self, box: Box, color=Qt.red):
-        rect = box.to_rect(self.img_w, self.img_h)
-        self.scene.addItem(BBoxItem(rect, cls=box.cls, color=color, on_change=self._notify_boxes_changed))
+    def add_box_norm(self, box, color=Qt.red):
+        if isinstance(box, Box):
+            vb = box
+        else:
+            cls = int(getattr(box, 'cls', 0))
+            cx = float(getattr(box, 'cx', 0.5))
+            cy = float(getattr(box, 'cy', 0.5))
+            w = float(getattr(box, 'w', 0.1))
+            h = float(getattr(box, 'h', 0.1))
+            vb = Box(cls=cls, cx=cx, cy=cy, w=w, h=h)
+        rect = vb.to_rect(self.img_w, self.img_h)
+        self.scene.addItem(BBoxItem(rect, cls=vb.cls, color=color, on_change=self._notify_boxes_changed))
 
     def clear_boxes(self):
         changed = False
@@ -205,7 +242,9 @@ class ImageView(QGraphicsView):
     def get_boxes_as_norm(self) -> List[Box]:
         out = []
         for it in self.all_boxes():
+            # Get the rectangle in scene coordinates
             r_scene = it.mapRectToScene(it.rect())
+            # Since image is at (0,0), scene coordinates = image coordinates
             out.append(Box.from_rect(it.cls, r_scene, self.img_w, self.img_h))
         return out
 

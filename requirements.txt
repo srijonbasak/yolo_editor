@@ -4,3 +4,5 @@ opencv-python==4.9.0.80
 Pillow>=10.0.0
 imagehash==4.3.1
 tqdm==4.66.4
+cachetools>=5.3.0
+pydantic>=2.0.0

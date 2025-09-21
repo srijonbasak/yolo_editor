@@ -10,3 +10,5 @@ class MergeScene(QGraphicsScene):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.sigs = SceneSignals()
+        # Set up scene for better interaction
+        self.setItemIndexMethod(QGraphicsScene.ItemIndexMethod.NoIndex)
