@@ -20,10 +20,11 @@ def yolo_to_rect(x, y, w, h, iw, ih):
 
 def rect_to_yolo(rect: QRectF, iw, ih):
     cx = (rect.left() + rect.width() / 2) / iw
-    cy = (rect.top() + rect.height() / 2) / ih
-    w  = rect.width() / iw
+    cy = (rect.top()  + rect.height() / 2) / ih
+    w  = rect.width()  / iw
     h  = rect.height() / ih
     return cx, cy, w, h
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -79,6 +80,12 @@ class MainWindow(QMainWindow):
         mfile.addSeparator()
         act_quit = QAction("Quit", self); act_quit.triggered.connect(self.close); mfile.addAction(act_quit)
 
+        medit = menubar.addMenu("&Edit")
+        act_delete = QAction("Delete Selected", self)
+        act_delete.setShortcut("Delete")
+        act_delete.triggered.connect(self.delete_selected)
+        medit.addAction(act_delete)
+
         mnav = menubar.addMenu("&Navigate")
         act_prev = QAction("Previous", self)
         act_prev.setShortcuts([QKeySequence(Qt.Key_Left), QKeySequence("P")])
@@ -104,6 +111,7 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         tb.addAction("Prev", self.prev_image)
         tb.addAction("Next", self.next_image)
+        tb.addAction("Delete", self.delete_selected)
         tb.addAction("Save", self.save_labels)
 
     def _build_docks(self):
@@ -140,7 +148,7 @@ class MainWindow(QMainWindow):
         if not yaml_path:
             return
         yp = Path(yaml_path).resolve()
-        self.repo = DatasetRepository(root=yp.parent, yaml_path=yp)  # <-- pass YAML explicitly
+        self.repo = DatasetRepository(root=yp.parent, yaml_path=yp)
         self._after_repo_loaded()
 
     def show_diagnostics(self):
@@ -247,7 +255,8 @@ class MainWindow(QMainWindow):
         img_bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
         if img_bgr is None:
             return None
-        return cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+        return rgb
 
     def load_current(self):
         if not self.images: return
@@ -258,7 +267,7 @@ class MainWindow(QMainWindow):
             return
 
         h, w, ch = rgb.shape
-        qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
+        qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888).copy()  # copy -> avoid buffer lifetime crash
         pm = QPixmap.fromImage(qimg)
         self.scene.set_image(pm)
 
@@ -344,7 +353,9 @@ class MainWindow(QMainWindow):
         rows = []
         for it in self.scene.items():
             if isinstance(it, BBoxItem):
-                cx, cy, w, h = rect_to_yolo(it.rect(), iw, ih)
+                # map rect (in item coords) -> scene coords, then treat as image pixels
+                r_scene = it.mapRectToScene(it.rect())
+                cx, cy, w, h = rect_to_yolo(r_scene, iw, ih)
                 rows.append((it.cls_id, cx, cy, w, h))
         tmp = lbl_path.with_suffix(".txt.tmp")
         save_label_file(tmp, rows)
