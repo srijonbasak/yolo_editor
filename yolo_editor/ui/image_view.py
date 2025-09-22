@@ -49,7 +49,8 @@ class BBoxItem(QGraphicsRectItem):
         scene_rect = rect.normalized()
         width = max(scene_rect.width(), 2)
         height = max(scene_rect.height(), 2)
-        super().__init__(scene_rect.x(), scene_rect.y(), width, height)
+        super().__init__(0, 0, width, height)
+        self.setPos(scene_rect.left(), scene_rect.top())
 
         self._on_change = on_change
         self.setFlags(
@@ -62,11 +63,13 @@ class BBoxItem(QGraphicsRectItem):
         self.class_name = class_name or str(cls)
 
         self._pen_color = QColor(color) if isinstance(color, QColor) else QColor(color)
-        self.setPen(QPen(self._pen_color, 2))
+        pen = QPen(self._pen_color, 2)
+        pen.setCosmetic(True)
+        self.setPen(pen)
 
         self._label_bg = QGraphicsRectItem(self)
         self._label_bg.setBrush(QBrush(QColor(0, 0, 0, 160)))
-        self._label_bg.setPen(Qt.PenStyle.NoPen)
+        self._label_bg.setPen(QPen(Qt.PenStyle.NoPen))
         self._label_bg.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
         self._label_bg.setZValue(self.zValue() + 1)
 
@@ -75,8 +78,6 @@ class BBoxItem(QGraphicsRectItem):
         self._label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
         self._label.setZValue(self.zValue() + 2)
 
-        self.set_color(color)
-
         self._suppress_handle_feedback: bool = False
         self._handles: dict[str, Handle] = {}
         for pid in ("tl", "tr", "bl", "br"):
@@ -84,15 +85,15 @@ class BBoxItem(QGraphicsRectItem):
             self._handles[pid] = h
         self.update_handles()
         self._update_label_position()
-
     def set_color(self, color):
         qc = QColor(color) if not isinstance(color, QColor) else QColor(color)
         self._pen_color = qc
-        self.setPen(QPen(qc, 2))
+        pen = QPen(qc, 2)
+        pen.setCosmetic(True)
+        self.setPen(pen)
         bg = QColor(qc)
         bg.setAlpha(140)
         self._label_bg.setBrush(QBrush(bg))
-
     def set_class(self, cls: int, class_name: Optional[str] = None):
         self.cls = cls
         if class_name:
@@ -101,23 +102,21 @@ class BBoxItem(QGraphicsRectItem):
             self.class_name = str(cls)
         self._label.setText(self.class_name)
         self._update_label_position()
-
     def _update_label_position(self):
         rect = self.rect()
         self._label.setPos(rect.left() + 4, rect.top() + 4)
         br = self._label.boundingRect()
         self._label_bg.setRect(0, 0, br.width() + 8, br.height() + 6)
         self._label_bg.setPos(rect.left() + 2, rect.top() + 2)
-
     def _set_scene_rect(self, scene_rect: QRectF):
         scene_rect = scene_rect.normalized()
         self.prepareGeometryChange()
         w = max(scene_rect.width(), 2)
         h = max(scene_rect.height(), 2)
-        self.setRect(scene_rect.x(), scene_rect.y(), w, h)
+        self.setRect(0, 0, w, h)
+        self.setPos(scene_rect.left(), scene_rect.top())
         self.update_handles()
         self._update_label_position()
-
     def on_handle_moved(self, handle: "Handle"):
         scene_rect = self.mapRectToScene(self.rect())
         handle_scene = handle.mapToScene(QPointF(0, 0))
