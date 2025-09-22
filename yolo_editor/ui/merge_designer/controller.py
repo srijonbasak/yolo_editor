@@ -29,11 +29,13 @@ class MergeModel:
     targets: Dict[int, TargetClass] = field(default_factory=dict)
     # Many-to-one edges
     edges: List[MappingEdge] = field(default_factory=list)
+    # Optional edge limits (per source class)
+    edge_limits: Dict[Tuple[str, int], int] = field(default_factory=dict)
 
 class MergeController:
     """
     Pure model/controller: no Qt imports here.
-    Responsible for: target CRUD, wiring edges, live stats, quotas, and balanced allocations.
+    Responsible for: target CRUD, wiring edges, live stats, quotas, limits and balanced allocations.
     """
     def __init__(self):
         self.model = MergeModel()
@@ -47,7 +49,11 @@ class MergeController:
         if dataset_id in self.model.sources:
             self.model.sources.pop(dataset_id)
         # drop any edges that referenced it
+        removed_keys = {e.source_key for e in self.model.edges if e.source_key[0] == dataset_id}
         self.model.edges = [e for e in self.model.edges if e.source_key[0] != dataset_id]
+        # drop edge limits that referenced it
+        for key in removed_keys:
+            self.model.edge_limits.pop(key, None)
 
     # ---------- TARGET MANAGEMENT ----------
     def add_target_class(self, name: str, quota_images: Optional[int] = None) -> int:
@@ -64,20 +70,52 @@ class MergeController:
         if target_id in self.model.targets:
             self.model.targets[target_id].quota_images = quota_images
 
+    def get_target_quota(self, target_id: int) -> Optional[int]:
+        tgt = self.model.targets.get(target_id)
+        return tgt.quota_images if tgt else None
+
     def remove_target_class(self, target_id: int):
         if target_id in self.model.targets:
             self.model.targets.pop(target_id)
+        removed_keys = [e.source_key for e in self.model.edges if e.target_id == target_id]
         self.model.edges = [e for e in self.model.edges if e.target_id != target_id]
+        for key in removed_keys:
+            self.model.edge_limits.pop(key, None)
 
     # ---------- EDGE/WIRING ----------
-    def connect(self, dataset_id: str, class_id: int, target_id: int):
+    def connect(self, dataset_id: str, class_id: int, target_id: int) -> bool:
+        """Wire a source class to a target. Returns True if the mapping changed."""
         key = (dataset_id, class_id)
-        if key not in [(e.source_key[0], e.source_key[1]) for e in self.model.edges if e.target_id == target_id]:
-            self.model.edges.append(MappingEdge(source_key=key, target_id=target_id))
+        current = None
+        for e in self.model.edges:
+            if e.source_key == key:
+                current = e.target_id
+                break
+        if current == target_id:
+            return False
+        if current is not None:
+            self.model.edges = [e for e in self.model.edges if e.source_key != key]
+            self.model.edge_limits.pop(key, None)
+        self.model.edges.append(MappingEdge(source_key=key, target_id=target_id))
+        return True
 
     def disconnect(self, dataset_id: str, class_id: int, target_id: int):
+        key = (dataset_id, class_id)
+        before = len(self.model.edges)
         self.model.edges = [e for e in self.model.edges
-                            if not (e.source_key == (dataset_id, class_id) and e.target_id == target_id)]
+                            if not (e.source_key == key and e.target_id == target_id)]
+        if len(self.model.edges) != before:
+            self.model.edge_limits.pop(key, None)
+
+    def set_edge_limit(self, dataset_id: str, class_id: int, limit: Optional[int]):
+        key = (dataset_id, class_id)
+        if limit is None or limit <= 0:
+            self.model.edge_limits.pop(key, None)
+        else:
+            self.model.edge_limits[key] = int(limit)
+
+    def get_edge_limit(self, dataset_id: str, class_id: int) -> Optional[int]:
+        return self.model.edge_limits.get((dataset_id, class_id))
 
     # ---------- LIVE STATS ----------
     def target_stats(self, target_id: int) -> Dict[str, int]:
@@ -85,7 +123,8 @@ class MergeController:
         images = 0
         boxes = 0
         for e in self.model.edges:
-            if e.target_id != target_id: continue
+            if e.target_id != target_id:
+                continue
             ds, cid = e.source_key
             src = self._find_source_class(ds, cid)
             if src:
@@ -93,7 +132,7 @@ class MergeController:
                 boxes += src.boxes
         return {"images": images, "boxes": boxes}
 
-    def planned_allocation(self, target_id: int) -> Dict[Tuple[str,int], int]:
+    def planned_allocation(self, target_id: int) -> Dict[Tuple[str, int], int]:
         """
         If target has a quota_images, split intake across connected sources (by images) as evenly as possible.
         Returns per-source planned image counts.
@@ -101,8 +140,7 @@ class MergeController:
         tgt = self.model.targets.get(target_id)
         if not tgt:
             return {}
-        # gather all sources wired to this target
-        entries: List[Tuple[Tuple[str,int], int]] = []  # ((dataset_id, class_id), images)
+        entries: List[Tuple[Tuple[str, int], int]] = []
         for e in self.model.edges:
             if e.target_id == target_id:
                 src = self._find_source_class(e.source_key[0], e.source_key[1])
@@ -112,29 +150,21 @@ class MergeController:
             return {}
 
         total_available = sum(img for _, img in entries)
-        if tgt.quota_images is None or tgt.quota_images >= total_available:
-            # no cap: take all
+        quota = tgt.quota_images
+        if quota is None or quota >= total_available:
             return {key: img for key, img in entries}
 
-        # cap exists: distribute as evenly as possible by proportion, then round
-        cap = tgt.quota_images
-        # naive proportional rounding
+        cap = quota
         alloc = {key: int(round((img / total_available) * cap)) for key, img in entries}
-        # fix rounding drift
         drift = cap - sum(alloc.values())
-        # adjust biggest contributors (or smallest) to hit exact cap
         if drift != 0:
-            # sort by remainder preference
-            from math import modf
-            order = sorted(entries, key=lambda kv: -(kv[1]/total_available)) if drift < 0 else \
-                    sorted(entries, key=lambda kv: (kv[1]/total_available))
-            i = 0
-            while drift != 0 and i < len(order):
-                key = order[i][0]
-                alloc[key] += 1 if drift > 0 else -1
+            order = sorted(entries, key=lambda kv: kv[1], reverse=(drift < 0))
+            idx = 0
+            while drift != 0 and order:
+                key = order[idx % len(order)][0]
+                alloc[key] = max(0, alloc[key] + (1 if drift > 0 else -1))
                 drift += -1 if drift > 0 else 1
-                i = (i + 1) % len(order)
-        # ensure non-negative and not exceeding each source
+                idx += 1
         for key, img in entries:
             alloc[key] = max(0, min(alloc[key], img))
         return alloc
@@ -145,3 +175,9 @@ class MergeController:
             if sc.class_id == class_id:
                 return sc
         return None
+
+    def get_source_class(self, dataset_id: str, class_id: int) -> Optional[SourceClass]:
+        return self._find_source_class(dataset_id, class_id)
+
+    def get_target(self, target_id: int) -> Optional[TargetClass]:
+        return self.model.targets.get(target_id)

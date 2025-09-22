@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Optional, Tuple
 from PySide6.QtWidgets import QGraphicsPathItem, QGraphicsItem
 from PySide6.QtGui import QPainterPath, QPen, QColor
 from PySide6.QtCore import QPointF
@@ -11,10 +12,18 @@ class EdgeItem(QGraphicsPathItem):
         super().__init__()
         self.setZValue(-1)
         self.setPen(QPen(color, 2))
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setAcceptHoverEvents(True)
         self.src_item = src_item
         self.dst_item = dst_item
         self.floating_pos: QPointF | None = None
+        self.edge_key: Optional[Tuple[str, int]] = None  # (dataset_id, class_id)
+        self.target_id: Optional[int] = None
         self._update_path()
+
+    def assign_metadata(self, edge_key: Tuple[str, int], target_id: int):
+        self.edge_key = edge_key
+        self.target_id = target_id
 
     def set_floating(self, pos: QPointF):
         self.floating_pos = QPointF(pos)

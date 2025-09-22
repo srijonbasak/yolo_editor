@@ -1,12 +1,13 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Dict
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
-from PySide6.QtGui import QPixmap, QImage, QPen, QBrush, QAction, QPainter
+from PySide6.QtGui import QPixmap, QImage, QPen, QBrush, QAction, QPainter, QColor
 from PySide6.QtWidgets import (
     QGraphicsView, QGraphicsScene, QGraphicsPixmapItem, QGraphicsRectItem,
+    QGraphicsSimpleTextItem,
     QGraphicsItem, QWidget, QMenu
 )
 
@@ -44,47 +45,80 @@ class Box:
         return Box(cls=cls, cx=float(cx), cy=float(cy), w=float(ww), h=float(hh))
 
 class BBoxItem(QGraphicsRectItem):
-    def __init__(self, rect: QRectF, cls: int, color=Qt.red, on_change: Optional[Callable[[], None]] = None):
+    def __init__(self, rect: QRectF, cls: int, class_name: str = '', color=Qt.red, on_change: Optional[Callable[[], None]] = None):
         scene_rect = rect.normalized()
-        # Ensure minimum size to avoid horizontal lines
         width = max(scene_rect.width(), 2)
         height = max(scene_rect.height(), 2)
-        
-        # Create the rectangle directly with proper coordinates
         super().__init__(scene_rect.x(), scene_rect.y(), width, height)
-        
+
         self._on_change = on_change
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
             | QGraphicsItem.GraphicsItemFlag.ItemIsMovable
             | QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges
         )
-        self.setPen(QPen(color, 2))
         self.setBrush(QBrush(Qt.transparent))
         self.cls = cls
+        self.class_name = class_name or str(cls)
 
-        # guard to avoid infinite recursion when we reposition handles ourselves
+        self._pen_color = QColor(color) if isinstance(color, QColor) else QColor(color)
+        self.setPen(QPen(self._pen_color, 2))
+
+        self._label_bg = QGraphicsRectItem(self)
+        self._label_bg.setBrush(QBrush(QColor(0, 0, 0, 160)))
+        self._label_bg.setPen(Qt.PenStyle.NoPen)
+        self._label_bg.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
+        self._label_bg.setZValue(self.zValue() + 1)
+
+        self._label = QGraphicsSimpleTextItem(self.class_name, self)
+        self._label.setBrush(QBrush(Qt.white))
+        self._label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations)
+        self._label.setZValue(self.zValue() + 2)
+
+        self.set_color(color)
+
         self._suppress_handle_feedback: bool = False
-
-        # Create 4 corner handles
         self._handles: dict[str, Handle] = {}
         for pid in ("tl", "tr", "bl", "br"):
             h = Handle(self, pid)
             self._handles[pid] = h
         self.update_handles()
+        self._update_label_position()
+
+    def set_color(self, color):
+        qc = QColor(color) if not isinstance(color, QColor) else QColor(color)
+        self._pen_color = qc
+        self.setPen(QPen(qc, 2))
+        bg = QColor(qc)
+        bg.setAlpha(140)
+        self._label_bg.setBrush(QBrush(bg))
+
+    def set_class(self, cls: int, class_name: Optional[str] = None):
+        self.cls = cls
+        if class_name:
+            self.class_name = class_name
+        else:
+            self.class_name = str(cls)
+        self._label.setText(self.class_name)
+        self._update_label_position()
+
+    def _update_label_position(self):
+        rect = self.rect()
+        self._label.setPos(rect.left() + 4, rect.top() + 4)
+        br = self._label.boundingRect()
+        self._label_bg.setRect(0, 0, br.width() + 8, br.height() + 6)
+        self._label_bg.setPos(rect.left() + 2, rect.top() + 2)
 
     def _set_scene_rect(self, scene_rect: QRectF):
         scene_rect = scene_rect.normalized()
         self.prepareGeometryChange()
-        # Ensure minimum size to avoid horizontal lines
         w = max(scene_rect.width(), 2)
         h = max(scene_rect.height(), 2)
-        # Set the rectangle directly with proper coordinates
         self.setRect(scene_rect.x(), scene_rect.y(), w, h)
         self.update_handles()
+        self._update_label_position()
 
     def on_handle_moved(self, handle: "Handle"):
-        """Called when a user drags a corner handle; update the rect."""
         scene_rect = self.mapRectToScene(self.rect())
         handle_scene = handle.mapToScene(QPointF(0, 0))
         if handle.pos_id == "tl":
@@ -93,11 +127,10 @@ class BBoxItem(QGraphicsRectItem):
             fixed = scene_rect.bottomLeft()
         elif handle.pos_id == "bl":
             fixed = scene_rect.topRight()
-        else:  # "br"
+        else:
             fixed = scene_rect.topLeft()
 
         new_scene = QRectF(handle_scene, fixed).normalized()
-        # Ensure minimum size to avoid horizontal lines
         if new_scene.width() < 2:
             new_scene.setWidth(2)
         if new_scene.height() < 2:
@@ -120,6 +153,7 @@ class BBoxItem(QGraphicsRectItem):
             self._suppress_handle_feedback = True
             try:
                 self.update_handles()
+                self._update_label_position()
             finally:
                 self._suppress_handle_feedback = False
         result = super().itemChange(change, value)
@@ -140,8 +174,6 @@ class BBoxItem(QGraphicsRectItem):
     def _emit_change(self):
         if self._on_change:
             self._on_change()
-
-
 class Handle(QGraphicsRectItem):
     def __init__(self, parent_rect: BBoxItem, pos: str, size: float = 8.0):
         super().__init__(-size/2, -size/2, size, size, parent_rect)
@@ -188,6 +220,8 @@ class ImageView(QGraphicsView):
         self._current_class: int = 0
         self._class_names: List[str] = []
         self._on_status: Optional[Callable[[str], None]] = None
+        self._class_color_cache: Dict[int, QColor] = {}
+        self._temp_rect = None
 
         self.act_delete = QAction("Delete selected", self)
         self.act_delete.triggered.connect(self._emit_delete)
@@ -196,9 +230,24 @@ class ImageView(QGraphicsView):
 
     def set_status_sink(self, fn: Callable[[str], None]): self._on_status = fn
     def set_current_class(self, cid: int, names: List[str]): self._current_class = int(cid); self._class_names = names or []
+    def _class_name_for(self, cls: int) -> str:
+        if 0 <= cls < len(self._class_names):
+            return self._class_names[cls]
+        return str(cls)
+
+    def _color_for_class(self, cls: int) -> QColor:
+        color = self._class_color_cache.get(cls)
+        if color is None:
+            hue = (hash((cls, 'yolo-editor')) % 360)
+            color = QColor.fromHsv(hue, 200, 255, 220)
+            self._class_color_cache[cls] = color
+        return color
 
     def show_image_bgr(self, path: Path, bgr_img):
+        self.resetTransform()
         self.scene.clear()
+        self._temp_rect = None
+        self.img_item = None
         qimg = qimage_from_cv_bgr(bgr_img)
         self.img_w, self.img_h = qimg.width(), qimg.height()
         pix = QPixmap.fromImage(qimg)
@@ -211,7 +260,7 @@ class ImageView(QGraphicsView):
         # Update scene rect to match the image
         self.scene.setSceneRect(0, 0, self.img_w, self.img_h)
 
-    def add_box_norm(self, box, color=Qt.red):
+    def add_box_norm(self, box, color=None):
         if isinstance(box, Box):
             vb = box
         else:
@@ -222,7 +271,10 @@ class ImageView(QGraphicsView):
             h = float(getattr(box, 'h', 0.1))
             vb = Box(cls=cls, cx=cx, cy=cy, w=w, h=h)
         rect = vb.to_rect(self.img_w, self.img_h)
-        self.scene.addItem(BBoxItem(rect, cls=vb.cls, color=color, on_change=self._notify_boxes_changed))
+        name = self._class_name_for(vb.cls)
+        pen_color = color or self._color_for_class(vb.cls)
+        item = BBoxItem(rect, cls=vb.cls, class_name=name, color=pen_color, on_change=self._notify_boxes_changed)
+        self.scene.addItem(item)
 
     def clear_boxes(self):
         changed = False
@@ -293,10 +345,12 @@ class ImageView(QGraphicsView):
             self._start_pos = None
             self._clear_temp_rect()
             if rect.width() > 4 and rect.height() > 4:
-                self.scene.addItem(BBoxItem(rect, cls=self._current_class, on_change=self._notify_boxes_changed))
+                color = self._color_for_class(self._current_class)
+                name = self._class_name_for(self._current_class)
+                item = BBoxItem(rect, cls=self._current_class, class_name=name, color=color, on_change=self._notify_boxes_changed)
+                self.scene.addItem(item)
                 self._notify_boxes_changed()
                 if self._on_status:
-                    name = self._class_names[self._current_class] if 0 <= self._current_class < len(self._class_names) else str(self._current_class)
                     self._on_status(f"Added box -> class {self._current_class} ({name})")
             e.accept(); return
         super().mouseReleaseEvent(e)
@@ -356,7 +410,10 @@ class ImageView(QGraphicsView):
         if not selected:
             return
         for it in selected:
-            it.cls = self._current_class
+            name = self._class_name_for(self._current_class)
+            color = self._color_for_class(self._current_class)
+            it.set_class(self._current_class, name)
+            it.set_color(color)
         self.contextToCurrentClass.emit()
         self._notify_boxes_changed()
         if self._on_status:

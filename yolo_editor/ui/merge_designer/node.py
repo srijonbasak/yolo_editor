@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QGraphicsItem, QGraphicsRectItem, QGraphicsSimpleTextItem, QGraphicsEllipseItem,
     QGraphicsProxyWidget, QPushButton, QMenu
 )
-from PySide6.QtGui import QBrush, QPen, QColor, QCursor, QAction  # QAction is in QtGui on Qt6
+from PySide6.QtGui import QBrush, QPen, QColor, QCursor, QAction
 from PySide6.QtCore import QRectF, QPointF, Qt
 
 PORT_R = 6.0
@@ -32,7 +32,9 @@ class ClassBlock(QGraphicsRectItem):
     Visual block line: label + counts + a port (left for source, right for target).
     """
     def __init__(self, w: float, h: float, text: str, subtext: str = "",
-                 role: str = "source", key=None, color: str = "#efefef"):
+                 role: str = "source", key=None, color: str = "#efefef",
+                 on_double_click: Optional[Callable[[], None]] = None,
+                 context_menu_factory: Optional[Callable[[], Optional[QMenu]]] = None):
         super().__init__(0, 0, w, h)
         self.setBrush(QBrush(QColor(color)))
         self.setPen(QPen(QColor("#c9c9c9"), 1))
@@ -40,6 +42,11 @@ class ClassBlock(QGraphicsRectItem):
         self.subtitle = QGraphicsSimpleTextItem(subtext, self)
         self.role = role
         self.key = key
+        self._on_double_click = on_double_click
+        self._context_menu_factory = context_menu_factory
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setAcceptedMouseButtons(Qt.MouseButton.LeftButton | Qt.MouseButton.RightButton)
+        self.setAcceptHoverEvents(True)
         self._layout()
 
         # port
@@ -53,9 +60,29 @@ class ClassBlock(QGraphicsRectItem):
         self.subtitle.setText(s)
         self._layout()
 
+    def set_title(self, text: str):
+        self.title.setText(text)
+        self._layout()
+
     def _layout(self):
         self.title.setPos(10, 6)
         self.subtitle.setPos(10, 6 + 16)
+
+    def mouseDoubleClickEvent(self, event):
+        if self._on_double_click:
+            self._on_double_click()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def contextMenuEvent(self, event):
+        if self._context_menu_factory:
+            menu = self._context_menu_factory()
+            if menu and menu.actions():
+                menu.exec(event.screenPos().toPoint())
+                event.accept()
+                return
+        super().contextMenuEvent(event)
 
 
 class NodeItem(QGraphicsRectItem):
@@ -84,8 +111,11 @@ class NodeItem(QGraphicsRectItem):
         self._plus_proxy: Optional[QGraphicsProxyWidget] = None
         self.relayout()
 
-    def add_class_block(self, text: str, subtext: str, role: str, key, color: str = "#efefef"):
-        blk = ClassBlock(self.width - 8, 38, text=text, subtext=subtext, role=role, key=key, color=color)
+    def add_class_block(self, text: str, subtext: str, role: str, key, color: str = "#efefef",
+                        on_double_click: Optional[Callable[[], None]] = None,
+                        context_menu_factory: Optional[Callable[[], Optional[QMenu]]] = None):
+        blk = ClassBlock(self.width - 8, 38, text=text, subtext=subtext, role=role, key=key, color=color,
+                         on_double_click=on_double_click, context_menu_factory=context_menu_factory)
         self.blocks.append(blk)
         self.relayout()
         return blk
