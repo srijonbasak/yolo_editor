@@ -28,9 +28,9 @@ class MergePalette(QWidget):
 
         # Top controls
         top_row = QHBoxLayout()
-        self.btn_load = QPushButton("Load Dataset…")
+        self.btn_load = QPushButton("Load Dataset...")
         self.btn_load.clicked.connect(lambda: self.requestLoadDataset.emit())
-        self.btn_export = QPushButton("Export Merged…")
+        self.btn_export = QPushButton("Export Merged...")
         self.btn_export.clicked.connect(lambda: self.requestExportMerged.emit())
         top_row.addWidget(self.btn_load)
         top_row.addWidget(self.btn_export)

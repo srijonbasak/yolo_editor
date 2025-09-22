@@ -118,7 +118,7 @@ class MergeCanvas(QWidget):
         st = self.ctrl.target_stats(target_id)
         plan = self.ctrl.planned_allocation(target_id)
         if plan:
-            parts = [f"{ds}:{cid}→{n}" for (ds, cid), n in plan.items()]
+            parts = [f"{ds}:{cid}->{n}" for (ds, cid), n in plan.items()]
             return f"{st['images']} imgs / {st['boxes']} boxes | plan: {'; '.join(parts)}"
         return f"{st['images']} imgs / {st['boxes']} boxes"
 

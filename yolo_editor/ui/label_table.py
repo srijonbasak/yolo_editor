@@ -10,7 +10,7 @@ class LabelTable(QWidget):
         self.tbl = QTableWidget(0, 6)
         self.tbl.setHorizontalHeaderLabels(["#", "Class", "cx", "cy", "w", "h"])
         self.cmb_class = QComboBox()
-        self.btn_apply = QPushButton("Set selected → class")
+        self.btn_apply = QPushButton("Set selected -> class")
         self.btn_delete = QPushButton("Delete selected row(s)")
 
         top = QHBoxLayout()

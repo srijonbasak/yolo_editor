@@ -48,13 +48,13 @@ class MergeWorker(QObject):
 class MergeDesignerDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Merge Datasets — Designer")
+        self.setWindowTitle("Merge Datasets - Designer")
         self.resize(1400, 820)
 
         self.repo = MultiRepo()
         self.datasets_list = QListWidget()
-        self.btn_add_root = QPushButton("Add Dataset Root…")
-        self.btn_add_yaml = QPushButton("Add Dataset YAML…")
+        self.btn_add_root = QPushButton("Add Dataset Root...")
+        self.btn_add_yaml = QPushButton("Add Dataset YAML...")
 
         self.tbl_targets = QTableWidget(0, 3)
         self.tbl_targets.setHorizontalHeaderLabels(["Index", "Name", "Quota (images)"])
@@ -67,7 +67,7 @@ class MergeDesignerDialog(QDialog):
         self.tbl_mapping.setSortingEnabled(False)
 
         self.ed_output = QLineEdit()
-        self.btn_output = QPushButton("Select Output Dir…")
+        self.btn_output = QPushButton("Select Output Dir...")
         self.chk_dedup = QCheckBox("Drop near-duplicates (pHash)")
         self.spn_dedup = QSpinBox(); self.spn_dedup.setRange(0, 32); self.spn_dedup.setValue(6)
         self.chk_quality = QCheckBox("Quality filter (min res + blur)")
@@ -78,7 +78,7 @@ class MergeDesignerDialog(QDialog):
         self.spn_blur.setValue(50); self.spn_expo.setValue(0)
 
         self.btn_preview = QPushButton("Preview")
-        self.btn_merge = QPushButton("Merge…")
+        self.btn_merge = QPushButton("Merge...")
 
         tabs = QTabWidget()
         self.canvas = MappingCanvas()
@@ -99,7 +99,7 @@ class MergeDesignerDialog(QDialog):
         fl.addRow(rowt)
         left_l.addWidget(grp_tgt)
 
-        grp_map = QGroupBox("Source → Target Mapping & Limits")
+        grp_map = QGroupBox("Source -> Target Mapping & Limits")
         fl2 = QFormLayout(grp_map)
         fl2.addRow(self.tbl_mapping)
         left_l.addWidget(grp_map, 2)
@@ -395,7 +395,7 @@ class MergeDesignerDialog(QDialog):
         thread = QThread(self)
         worker.moveToThread(thread)
 
-        progress = QProgressDialog("Merging…", "Cancel", 0, 100, self)
+        progress = QProgressDialog("Merging...", "Cancel", 0, 100, self)
         progress.setWindowModality(Qt.WindowModal)
         progress.setAutoClose(False)
         progress.setAutoReset(False)

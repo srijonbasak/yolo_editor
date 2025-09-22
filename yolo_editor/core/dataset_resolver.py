@@ -131,7 +131,7 @@ def _resolve_from_root(root: Path) -> DatasetModel:
 
 
 def resolve_dataset(path: Path) -> DatasetModel:
-    """Accepts a dataset ROOT folder (train/val/test/…) or a data.yaml file."""
+    """Accepts a dataset ROOT folder (train/val/test/etc) or a data.yaml file."""
     if path.is_file() and path.suffix.lower() in (".yaml", ".yml"):
         dm = _resolve_from_yaml(path)
     else:

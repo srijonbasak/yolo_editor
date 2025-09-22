@@ -48,7 +48,7 @@ class MergePlan:
     drop_empty_images: bool = True
 
     target_train_name: str = "train"
-    target_val_name: str   = "eval"   # we also write 'val' alias in YAML
+    target_val_name: str   = "val"
     target_test_name: str  = "test"
 
     def to_json(self) -> dict:

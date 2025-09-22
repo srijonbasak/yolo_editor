@@ -36,8 +36,9 @@ class Box:
         return Box(cls=cls, cx=float(cx), cy=float(cy), w=float(ww), h=float(hh))
 
 class BBoxItem(QGraphicsRectItem):
-    def __init__(self, rect: QRectF, cls: int, color=Qt.red):
+    def __init__(self, rect: QRectF, cls: int, color=Qt.red, on_change: Optional[Callable[[], None]] = None):
         super().__init__(rect)
+        self._on_change = on_change
         self.setFlags(
             QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
             | QGraphicsItem.GraphicsItemFlag.ItemIsMovable
@@ -81,6 +82,7 @@ class BBoxItem(QGraphicsRectItem):
             self.update_handles()
         finally:
             self._suppress_handle_feedback = False
+        self._emit_change()
 
     def itemChange(self, change, value):
         # Keep handles in place when the whole rect is moved/selected/transformed
@@ -95,7 +97,13 @@ class BBoxItem(QGraphicsRectItem):
                 self.update_handles()
             finally:
                 self._suppress_handle_feedback = False
-        return super().itemChange(change, value)
+        result = super().itemChange(change, value)
+        if change in (
+            QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged,
+            QGraphicsItem.GraphicsItemChange.ItemTransformHasChanged
+        ):
+            self._emit_change()
+        return result
 
     def update_handles(self):
         """Reposition corner handles to rect corners."""
@@ -106,6 +114,10 @@ class BBoxItem(QGraphicsRectItem):
         self._handles["tr"].setPos(r.topRight())
         self._handles["bl"].setPos(r.bottomLeft())
         self._handles["br"].setPos(r.bottomRight())
+
+    def _emit_change(self):
+        if self._on_change:
+            self._on_change()
 
 class Handle(QGraphicsRectItem):
     def __init__(self, parent_rect: BBoxItem, pos: str, size: float = 8.0):
@@ -131,6 +143,7 @@ class ImageView(QGraphicsView):
     requestPrev = Signal()
     requestNext = Signal()
     boxSelectionChanged = Signal()
+    boxesChanged = Signal()
     contextDelete = Signal()
     contextToCurrentClass = Signal()
 
@@ -138,8 +151,10 @@ class ImageView(QGraphicsView):
         super().__init__(parent)
         self.setRenderHints(self.renderHints() | QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
         self.scene = QGraphicsScene(self)
         self.setScene(self.scene)
+        self.scene.selectionChanged.connect(self._on_scene_selection_changed)
 
         self.img_item: Optional[QGraphicsPixmapItem] = None
         self.image_path: Optional[Path] = None
@@ -170,12 +185,16 @@ class ImageView(QGraphicsView):
 
     def add_box_norm(self, box: Box, color=Qt.red):
         rect = box.to_rect(self.img_w, self.img_h)
-        self.scene.addItem(BBoxItem(rect, cls=box.cls, color=color))
+        self.scene.addItem(BBoxItem(rect, cls=box.cls, color=color, on_change=self._notify_boxes_changed))
 
     def clear_boxes(self):
+        changed = False
         for it in list(self.scene.items()):
             if isinstance(it, BBoxItem):
                 self.scene.removeItem(it)
+                changed = True
+        if changed:
+            self._notify_boxes_changed()
 
     def selected_boxes(self) -> List[BBoxItem]:
         return [it for it in self.scene.selectedItems() if isinstance(it, BBoxItem)]
@@ -192,9 +211,9 @@ class ImageView(QGraphicsView):
 
     def keyPressEvent(self, e):
         k = e.key()
-        if k in (Qt.Key_Left, Qt.Key.Key_A) and (e.modifiers() == Qt.NoModifier):
+        if k in (Qt.Key_Left, Qt.Key.Key_A, Qt.Key.Key_P) and (e.modifiers() == Qt.NoModifier):
             self.requestPrev.emit(); e.accept(); return
-        if k in (Qt.Key_Right, Qt.Key.Key_D) and (e.modifiers() == Qt.NoModifier):
+        if k in (Qt.Key_Right, Qt.Key.Key_D, Qt.Key.Key_N) and (e.modifiers() == Qt.NoModifier):
             self.requestNext.emit(); e.accept(); return
         if k == Qt.Key.Key_Delete:
             self._emit_delete(); e.accept(); return
@@ -209,10 +228,14 @@ class ImageView(QGraphicsView):
         super().keyPressEvent(e)
 
     def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.LeftButton and (e.modifiers() & Qt.KeyboardModifier.ControlModifier):
-            self._adding = True
-            self._start_pos = self.mapToScene(e.pos())
-            e.accept(); return
+        if e.button() == Qt.MouseButton.LeftButton:
+            target = self.itemAt(e.pos())
+            allow_blank = (target is None) or (target is self.img_item)
+            if (e.modifiers() & Qt.KeyboardModifier.ControlModifier) or allow_blank:
+                self._adding = True
+                self._start_pos = self.mapToScene(e.pos())
+                e.accept()
+                return
         super().mousePressEvent(e)
 
     def mouseMoveEvent(self, e):
@@ -231,12 +254,21 @@ class ImageView(QGraphicsView):
             self._start_pos = None
             self._clear_temp_rect()
             if rect.width() > 4 and rect.height() > 4:
-                self.scene.addItem(BBoxItem(rect, cls=self._current_class))
+                self.scene.addItem(BBoxItem(rect, cls=self._current_class, on_change=self._notify_boxes_changed))
+                self._notify_boxes_changed()
                 if self._on_status:
                     name = self._class_names[self._current_class] if 0 <= self._current_class < len(self._class_names) else str(self._current_class)
-                    self._on_status(f"Added box → class {self._current_class} ({name})")
+                    self._on_status(f"Added box -> class {self._current_class} ({name})")
             e.accept(); return
         super().mouseReleaseEvent(e)
+
+    def wheelEvent(self, e):
+        if e.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            factor = 1.2 if e.angleDelta().y() > 0 else 1 / 1.2
+            self.scale(factor, factor)
+            e.accept()
+            return
+        super().wheelEvent(e)
 
     def contextMenuEvent(self, e):
         m = QMenu(self)
@@ -244,6 +276,17 @@ class ImageView(QGraphicsView):
         m.addSeparator()
         m.addAction(self.act_delete)
         m.exec(e.globalPos())
+
+    def _notify_boxes_changed(self):
+        self.boxesChanged.emit()
+
+    def _on_scene_selection_changed(self):
+        self.boxSelectionChanged.emit()
+        if self._on_status:
+            count = len(self.selected_boxes())
+            if count:
+                word = 'box' if count == 1 else 'boxes'
+                self._on_status(f"Selected {count} {word}")
 
     def _draw_temp_rect(self, rect: QRectF):
         if getattr(self, "_temp_rect", None) is None:
@@ -257,11 +300,28 @@ class ImageView(QGraphicsView):
             self._temp_rect = None
 
     def _emit_delete(self):
-        for it in self.selected_boxes():
+        selected = self.selected_boxes()
+        if not selected:
+            return
+        for it in selected:
             self.scene.removeItem(it)
         self.contextDelete.emit()
+        self._notify_boxes_changed()
+        if self._on_status:
+            count = len(selected)
+            word = 'box' if count == 1 else 'boxes'
+            self._on_status(f"Deleted {count} {word}")
 
     def _emit_to_current(self):
-        for it in self.selected_boxes():
+        selected = self.selected_boxes()
+        if not selected:
+            return
+        for it in selected:
             it.cls = self._current_class
         self.contextToCurrentClass.emit()
+        self._notify_boxes_changed()
+        if self._on_status:
+            name = self._class_names[self._current_class] if 0 <= self._current_class < len(self._class_names) else str(self._current_class)
+            count = len(selected)
+            word = 'box' if count == 1 else 'boxes'
+            self._on_status(f"Set {count} {word} -> class {self._current_class} ({name})")

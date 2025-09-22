@@ -16,7 +16,7 @@ def _dst_split_name(plan: MergePlan, source_split: str) -> str:
     if plan.split_strategy == SplitStrategy.FLATTEN:
         return plan.target_train_name
     if norm == "train": return plan.target_train_name
-    if norm == "val":   return plan.target_val_name   # -> "eval" per spec
+    if norm == "val":   return plan.target_val_name
     if norm == "test":  return plan.target_test_name
     return plan.target_train_name
 
@@ -29,8 +29,8 @@ def merge_execute(
 ):
     out_root = plan.output_dir
     for split in (plan.target_train_name, plan.target_val_name, plan.target_test_name):
-        safe_mkdirs(out_root / split / "Image")
-        safe_mkdirs(out_root / split / "Labels")
+        safe_mkdirs(out_root / split / "images")
+        safe_mkdirs(out_root / split / "labels")
 
     total = sum(len(ds.repo.list_images()) for ds in sources)
     prog = Progress(total=total)
@@ -60,15 +60,15 @@ def merge_execute(
                     if progress_cb: progress_cb(prog)
                     continue
 
-                dst_img = out_root / dst_split / "Image" / img.name
+                dst_img = out_root / dst_split / "images" / img.name
                 safe_mkdirs(dst_img.parent)
                 if plan.collision_policy == CollisionPolicy.RENAME and dst_img.exists():
                     dst_img = resolve_collision_name(dst_img, img, ds.id)
                 elif plan.collision_policy == CollisionPolicy.SUBDIRS:
-                    dst_img = out_root / dst_split / "Image" / ds.id / img.name
+                    dst_img = out_root / dst_split / "images" / ds.id / img.name
                     safe_mkdirs(dst_img.parent)
 
-                dst_lbl = out_root / dst_split / "Labels" / (dst_img.stem + ".txt")
+                dst_lbl = out_root / dst_split / "labels" / (dst_img.stem + ".txt")
                 safe_mkdirs(dst_lbl.parent)
 
                 hardlink_or_copy(img, dst_img, prefer_hardlink=(plan.copy_mode == CopyMode.HARDLINK))
@@ -80,14 +80,12 @@ def merge_execute(
     names = [tc.name for tc in plan.target_classes]
     yaml_obj = {
         "path": ".",
-        "train": f"{plan.target_train_name}/Image",
-        "val":   f"{plan.target_val_name}/Image",   # Ultralytics expects 'val'
-        "test":  f"{plan.target_test_name}/Image",
+        "train": f"{plan.target_train_name}/images",
+        "val":   f"{plan.target_val_name}/images",
+        "test":  f"{plan.target_test_name}/images",
         "nc": len(names),
         "names": names,
     }
-    if plan.target_val_name != "val":
-        yaml_obj[plan.target_val_name] = f"{plan.target_val_name}/Image"
 
     with open(out_root / "data.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(yaml_obj, f, sort_keys=False)

@@ -20,7 +20,7 @@ from ..core.yolo_io import Box, read_yolo_txt, write_yolo_txt, labels_for_image,
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("YOLO Editor — Offline")
+        self.setWindowTitle("YOLO Editor - Offline")
         self.resize(1380, 860)
         self.setStatusBar(QStatusBar(self))
 
@@ -40,7 +40,7 @@ class MainWindow(QMainWindow):
         self._build_editor_ui(self.editor_root)
         self.tabs.addTab(self.editor_root, "Label Editor")
 
-        # (optional) keep your Merge tab — only if imports are available
+        # (optional) keep your Merge tab - only if imports are available
         try:
             from .merge_designer.canvas import MergeCanvas
             from .merge_designer.controller import MergeController
@@ -79,6 +79,8 @@ class MainWindow(QMainWindow):
         self.btn_save = QPushButton("Save"); self.btn_save.clicked.connect(self._save_labels)
         bar.addWidget(self.lbl_ds, 1); bar.addWidget(QLabel("Class:")); bar.addWidget(self.class_combo); bar.addStretch(1); bar.addWidget(self.btn_save)
         self.view = ImageView()
+        self.view.set_status_sink(lambda msg: self.statusBar().showMessage(msg, 3000))
+        self.view.boxesChanged.connect(self._on_boxes_changed)
         self.view.requestPrev.connect(lambda: self._open_index(max(0, self.idx-1)))
         self.view.requestNext.connect(lambda: self._open_index(min(len(self.images)-1, self.idx+1)))
         cv.addLayout(bar); cv.addWidget(self.view, 1)
@@ -102,8 +104,8 @@ class MainWindow(QMainWindow):
     def _build_menu(self):
         m = self.menuBar().addMenu("&File")
 
-        act_root = QAction("Open Dataset &Root…", self)
-        act_yaml = QAction("Open Dataset &YAML…", self)
+        act_root = QAction("Open Dataset &Root...", self)
+        act_yaml = QAction("Open Dataset &YAML...", self)
         act_quit = QAction("&Quit", self)
 
         act_root.triggered.connect(self._open_root)
@@ -120,6 +122,11 @@ class MainWindow(QMainWindow):
         a_prev.triggered.connect(lambda: self._open_index(max(0, self.idx-1)))
         a_next.triggered.connect(lambda: self._open_index(min(len(self.images)-1, self.idx+1)))
         for a in (a_save, a_prev, a_next): e.addAction(a)
+
+        tools = self.menuBar().addMenu("&Tools")
+        act_diag = QAction("Show &Diagnostics...", self)
+        act_diag.triggered.connect(self._show_diagnostics)
+        tools.addAction(act_diag)
 
     # ---------------- Open handlers ----------------
 
@@ -216,6 +223,7 @@ class MainWindow(QMainWindow):
         write_yolo_txt(txt, [Box(int(b.cls), b.cx, b.cy, b.w, b.h) for b in boxes])
         self._fill_table(boxes)
         self.statusBar().showMessage(f"Saved: {txt}", 4000)
+        self._compute_stats_and_show()
 
     def _fill_table(self, boxes: List[Box]):
         self.tbl.setRowCount(0)
@@ -229,6 +237,12 @@ class MainWindow(QMainWindow):
             self.tbl.setItem(r, 4, QTableWidgetItem(f"{b.w:.4f}"))
             self.tbl.setItem(r, 5, QTableWidgetItem(f"{b.h:.4f}"))
 
+    def _on_boxes_changed(self):
+        if self.idx < 0:
+            return
+        boxes = self.view.get_boxes_as_norm()
+        self._fill_table(boxes)
+
     def _highlight_tree_row(self, idx: int):
         root = self.file_tree.topLevelItem(0)
         if not root: return
@@ -239,7 +253,7 @@ class MainWindow(QMainWindow):
     def _on_class_changed(self, idx: int):
         self.view.set_current_class(idx, self.names)
         nm = self.names[idx] if 0 <= idx < len(self.names) else str(idx)
-        self.statusBar().showMessage(f"Current class → {nm} [{idx}]", 3000)
+        self.statusBar().showMessage(f"Current class -> {nm} [{idx}]", 3000)
 
     # ---------------- Stats ----------------
 
@@ -257,3 +271,24 @@ class MainWindow(QMainWindow):
         for cid in ids:
             nm = self.names[cid] if 0 <= cid < len(self.names) else str(cid)
             self.stats.addItem(f"[{cid}] {nm}: {per_imgs.get(cid,0)} imgs / {per_boxes.get(cid,0)} boxes")
+
+    def _show_diagnostics(self):
+        if not self.dm:
+            QMessageBox.information(self, "No dataset", "Load a dataset first.")
+            return
+        lines = [f"Dataset: {self.ds_name}"]
+        if getattr(self.dm, "yaml_path", None):
+            lines.append(f"YAML: {self.dm.yaml_path}")
+        if not self.dm.splits:
+            lines.append("No splits resolved.")
+        else:
+            for split in self.dm.ordered_splits():
+                info = self.dm.splits[split]
+                img_dir = info.get("images_dir")
+                labels_dir = info.get("labels_dir")
+                count = len(info.get("images", []))
+                lines.append(f"[{split}] images: {img_dir}")
+                label_text = labels_dir if labels_dir else '(next to images)'
+                lines.append(f"    labels: {label_text}")
+                lines.append(f"    image count: {count}")
+        QMessageBox.information(self, "Dataset diagnostics", "\n".join(lines))
