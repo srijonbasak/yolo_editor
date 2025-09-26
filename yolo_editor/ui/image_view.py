@@ -49,8 +49,8 @@ class BBoxItem(QGraphicsRectItem):
         scene_rect = rect.normalized()
         width = max(scene_rect.width(), 2)
         height = max(scene_rect.height(), 2)
-        super().__init__(0, 0, width, height)
-        self.setPos(scene_rect.left(), scene_rect.top())
+        scene_rect = QRectF(scene_rect.left(), scene_rect.top(), width, height)
+        super().__init__(scene_rect)
 
         self._on_change = on_change
         self.setFlags(
@@ -110,11 +110,11 @@ class BBoxItem(QGraphicsRectItem):
         self._label_bg.setPos(rect.left() + 2, rect.top() + 2)
     def _set_scene_rect(self, scene_rect: QRectF):
         scene_rect = scene_rect.normalized()
-        self.prepareGeometryChange()
         w = max(scene_rect.width(), 2)
         h = max(scene_rect.height(), 2)
-        self.setRect(0, 0, w, h)
-        self.setPos(scene_rect.left(), scene_rect.top())
+        scene_rect = QRectF(scene_rect.left(), scene_rect.top(), w, h)
+        self.prepareGeometryChange()
+        self.setRect(scene_rect)
         self.update_handles()
         self._update_label_position()
     def on_handle_moved(self, handle: "Handle"):
