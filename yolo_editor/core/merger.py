@@ -8,6 +8,9 @@ from .yolo_io import parse_label_file, save_label_file
 from .fsops import hardlink_or_copy, resolve_collision_name, safe_mkdirs
 from .progress import Progress, ProgressCallback, CancelToken
 from .splitting import normalize_split
+from .utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 ImgKey = Tuple[str, Path]  # (dataset_id, image_path)
 
@@ -32,7 +35,9 @@ def merge_execute(
         safe_mkdirs(out_root / split / "images")
         safe_mkdirs(out_root / split / "labels")
 
+    logger.info(f"Merge plan mapping: {plan.mapping}")
     total = sum(len(ds.repo.list_images()) for ds in sources)
+    logger.info(f"Total images to process: {total}")
     prog = Progress(total=total)
 
     for ds in sources:
@@ -52,8 +57,10 @@ def merge_execute(
                 for (cls, x, y, w, h) in rows:
                     tgt = plan.mapping.get((ds.id, cls), None)
                     if tgt is None:
+                        logger.debug(f"Skipping unmapped class {cls} in {img}")
                         continue
                     mapped_rows.append((tgt, x, y, w, h))
+                logger.debug(f"Image {img}: {len(rows)} boxes -> {len(mapped_rows)} mapped")
 
                 if plan.drop_empty_images and not mapped_rows:
                     prog.step()

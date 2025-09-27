@@ -87,8 +87,20 @@ def list_images(root: Path) -> List[Path]:
     return out
 
 
-def labels_for_image(img_path: Path, labels_dir: Optional[Path]) -> Path:
-    return (labels_dir / f"{img_path.stem}.txt") if labels_dir else img_path.with_suffix(".txt")
+def labels_for_image(img_path: Path, labels_dir: Optional[Path], images_dir: Optional[Path] = None) -> Path:
+    if not labels_dir:
+        return img_path.with_suffix(".txt")
+
+    rel_path: Path
+    if images_dir is not None:
+        try:
+            rel_path = img_path.relative_to(images_dir)
+        except ValueError:
+            rel_path = Path(img_path.name)
+    else:
+        rel_path = Path(img_path.name)
+
+    return (labels_dir / rel_path).with_suffix(".txt")
 
 
 # ---------------- YAML ----------------

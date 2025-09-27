@@ -32,8 +32,8 @@ class Box:
         height = self.h * h_img
         
         # Ensure minimum size to avoid horizontal lines
-        width = max(width, 2)
-        height = max(height, 2)
+        width = max(width, 8)
+        height = max(height, 8)
         
         return QRectF(x, y, width, height)
     @staticmethod
@@ -45,12 +45,14 @@ class Box:
         return Box(cls=cls, cx=float(cx), cy=float(cy), w=float(ww), h=float(hh))
 
 class BBoxItem(QGraphicsRectItem):
+    HANDLE_SIZE = 8.0
+
     def __init__(self, rect: QRectF, cls: int, class_name: str = '', color=Qt.red, on_change: Optional[Callable[[], None]] = None):
         scene_rect = rect.normalized()
-        width = max(scene_rect.width(), 2)
-        height = max(scene_rect.height(), 2)
-        scene_rect = QRectF(scene_rect.left(), scene_rect.top(), width, height)
-        super().__init__(scene_rect)
+        width = max(scene_rect.width(), 8)
+        height = max(scene_rect.height(), 8)
+        super().__init__(QRectF(0, 0, width, height))
+        self.setPos(scene_rect.x(), scene_rect.y())
 
         self._on_change = on_change
         self.setFlags(
@@ -63,7 +65,7 @@ class BBoxItem(QGraphicsRectItem):
         self.class_name = class_name or str(cls)
 
         self._pen_color = QColor(color) if isinstance(color, QColor) else QColor(color)
-        pen = QPen(self._pen_color, 2)
+        pen = QPen(self._pen_color, 3)
         pen.setCosmetic(True)
         self.setPen(pen)
 
@@ -81,14 +83,19 @@ class BBoxItem(QGraphicsRectItem):
         self._suppress_handle_feedback: bool = False
         self._handles: dict[str, Handle] = {}
         for pid in ("tl", "tr", "bl", "br"):
-            h = Handle(self, pid)
+            h = Handle(self, pid, size=self.HANDLE_SIZE)
             self._handles[pid] = h
         self.update_handles()
         self._update_label_position()
+
+    def boundingRect(self) -> QRectF:
+        rect = super().boundingRect()
+        margin = self.HANDLE_SIZE / 2 + 1
+        return rect.adjusted(-margin, -margin, margin, margin)
     def set_color(self, color):
         qc = QColor(color) if not isinstance(color, QColor) else QColor(color)
         self._pen_color = qc
-        pen = QPen(qc, 2)
+        pen = QPen(qc, 3)
         pen.setCosmetic(True)
         self.setPen(pen)
         bg = QColor(qc)
@@ -104,17 +111,23 @@ class BBoxItem(QGraphicsRectItem):
         self._update_label_position()
     def _update_label_position(self):
         rect = self.rect()
-        self._label.setPos(rect.left() + 4, rect.top() + 4)
-        br = self._label.boundingRect()
-        self._label_bg.setRect(0, 0, br.width() + 8, br.height() + 6)
-        self._label_bg.setPos(rect.left() + 2, rect.top() + 2)
+        if rect.width() < 20 or rect.height() < 20:
+            self._label_bg.hide()
+            self._label.hide()
+        else:
+            self._label_bg.show()
+            self._label.show()
+            self._label.setPos(rect.left() + 4, rect.top() + 4)
+            br = self._label.boundingRect()
+            self._label_bg.setRect(0, 0, br.width() + 8, br.height() + 6)
+            self._label_bg.setPos(rect.left() + 2, rect.top() + 2)
     def _set_scene_rect(self, scene_rect: QRectF):
         scene_rect = scene_rect.normalized()
-        w = max(scene_rect.width(), 2)
-        h = max(scene_rect.height(), 2)
-        scene_rect = QRectF(scene_rect.left(), scene_rect.top(), w, h)
+        w = max(scene_rect.width(), 8)
+        h = max(scene_rect.height(), 8)
         self.prepareGeometryChange()
-        self.setRect(scene_rect)
+        self.setPos(scene_rect.x(), scene_rect.y())
+        self.setRect(QRectF(0, 0, w, h))
         self.update_handles()
         self._update_label_position()
     def on_handle_moved(self, handle: "Handle"):
@@ -130,10 +143,10 @@ class BBoxItem(QGraphicsRectItem):
             fixed = scene_rect.topLeft()
 
         new_scene = QRectF(handle_scene, fixed).normalized()
-        if new_scene.width() < 2:
-            new_scene.setWidth(2)
-        if new_scene.height() < 2:
-            new_scene.setHeight(2)
+        if new_scene.width() < 8:
+            new_scene.setWidth(8)
+        if new_scene.height() < 8:
+            new_scene.setHeight(8)
 
         self._suppress_handle_feedback = True
         try:
@@ -274,6 +287,7 @@ class ImageView(QGraphicsView):
         pen_color = color or self._color_for_class(vb.cls)
         item = BBoxItem(rect, cls=vb.cls, class_name=name, color=pen_color, on_change=self._notify_boxes_changed)
         self.scene.addItem(item)
+        self.scene.update()
 
     def clear_boxes(self):
         changed = False
@@ -283,6 +297,7 @@ class ImageView(QGraphicsView):
                 changed = True
         if changed:
             self._notify_boxes_changed()
+            self.scene.update()
 
     def selected_boxes(self) -> List[BBoxItem]:
         return [it for it in self.scene.selectedItems() if isinstance(it, BBoxItem)]
@@ -343,11 +358,12 @@ class ImageView(QGraphicsView):
             self._adding = False
             self._start_pos = None
             self._clear_temp_rect()
-            if rect.width() > 4 and rect.height() > 4:
+            if rect.width() > 8 and rect.height() > 8:
                 color = self._color_for_class(self._current_class)
                 name = self._class_name_for(self._current_class)
                 item = BBoxItem(rect, cls=self._current_class, class_name=name, color=color, on_change=self._notify_boxes_changed)
                 self.scene.addItem(item)
+                self.scene.update()
                 self._notify_boxes_changed()
                 if self._on_status:
                     self._on_status(f"Added box -> class {self._current_class} ({name})")

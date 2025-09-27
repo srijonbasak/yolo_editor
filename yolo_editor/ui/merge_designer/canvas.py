@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Dict, Optional, Tuple, List
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsView, QMenu, QInputDialog
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsView, QMenu, QInputDialog, QHBoxLayout, QPushButton
 from PySide6.QtGui import QPainter, QWheelEvent, QAction
 from PySide6.QtCore import Qt, QPointF
 
@@ -24,6 +24,18 @@ class MergeCanvas(QWidget):
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
+
+        # Zoom controls
+        zoom_lay = QHBoxLayout()
+        self.btn_zoom_in = QPushButton("Zoom In")
+        self.btn_zoom_out = QPushButton("Zoom Out")
+        self.btn_zoom_in.clicked.connect(self._zoom_in)
+        self.btn_zoom_out.clicked.connect(self._zoom_out)
+        zoom_lay.addWidget(self.btn_zoom_in)
+        zoom_lay.addWidget(self.btn_zoom_out)
+        zoom_lay.addStretch(1)
+        lay.addLayout(zoom_lay)
+
         self.view = _GraphicsView(self)
         self.scene = MergeScene(self)
         self.view.setScene(self.scene)
@@ -49,10 +61,10 @@ class MergeCanvas(QWidget):
 
     # ---------- SPAWN ----------
     def spawn_dataset_node(self, dataset_id: str, classes: list[SourceClass], loading: bool = False, pos: QPointF = QPointF(40, 60)):
-        # force left column
+        # force right column
         if dataset_id in self.nodes:
             return
-        pos = QPointF(60, pos.y())
+        pos = QPointF(900, pos.y())
         node = NodeItem(title=f"Dataset: {dataset_id}", kind="dataset", x=pos.x(), y=pos.y())
         self.scene.addItem(node)
         self.nodes[dataset_id] = node
@@ -78,9 +90,9 @@ class MergeCanvas(QWidget):
 
         node.relayout()
 
-    def spawn_target_node(self, target_id: int, name: str, quota: Optional[int], pos: QPointF = QPointF(900, 60)):
-        # force right column
-        pos = QPointF(900, pos.y())
+    def spawn_target_node(self, target_id: int, name: str, quota: Optional[int], pos: QPointF = QPointF(60, 60)):
+        # force left column
+        pos = QPointF(60, pos.y())
         node = NodeItem(title="Target Dataset", kind="target", x=pos.x(), y=pos.y())
         self.scene.addItem(node)
         self.target_nodes[target_id] = node
@@ -198,6 +210,12 @@ class MergeCanvas(QWidget):
         node.relayout()
         self._recalc_all_targets()
 
+    def _zoom_in(self):
+        self.view.scale(1.15, 1.15)
+
+    def _zoom_out(self):
+        self.view.scale(1 / 1.15, 1 / 1.15)
+
     # ---------- WIRING ----------
     def mousePressOnPort(self, port: Port):
         if port.role == "source":
@@ -258,12 +276,18 @@ class MergeCanvas(QWidget):
 
     # ---------- REFRESH ----------
     def _recalc_all_targets(self):
-        for tid, node in self.target_nodes.items():
+        stale_ids = []
+        for tid, node in list(self.target_nodes.items()):
+            if not isinstance(node, NodeItem):
+                stale_ids.append(tid)
+                continue
             for blk in node.blocks:
                 if blk.role == "target" and blk.key == tid:
                     blk.set_title(self._target_block_title(tid))
                     blk.set_subtext(self._target_subtext(tid))
             node.relayout()
+        for tid in stale_ids:
+            self.target_nodes.pop(tid, None)
         for edge in self.edge_items.values():
             self._update_edge_tooltip(edge)
 
@@ -325,7 +349,7 @@ class MergeCanvas(QWidget):
 
     def _remove_target(self, target_id: int):
         node = self.target_nodes.pop(target_id, None)
-        if not node:
+        if not isinstance(node, NodeItem):
             return
         # disconnect + remove edges pointing to this target
         for edge_key, edge in list(self.edge_items.items()):
@@ -508,3 +532,4 @@ class _GraphicsView(QGraphicsView):
                 if hasattr(it, "advance"):
                     it.advance(0)
         super().timerEvent(e)
+

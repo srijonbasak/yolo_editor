@@ -148,7 +148,32 @@ Build:
 
 powershell
 Copy code
-        # Clean build venv (recommended): Python 3.11
+        # Clean build venv (recommended):Error calling Python override of QGraphicsView::keyPressEvent(): Traceback (most recent call last):
+  File "C:\Users\Srijon\Documents\Projects\yolo_editor\yolo_editor\ui\merge_designer\canvas.py", line 455, in keyPressEvent
+    self.canvas.delete_selection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Srijon\Documents\Projects\yolo_editor\yolo_editor\ui\merge_designer\canvas.py", line 324, in delete_selection
+    self._recalc_all_targets()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Srijon\Documents\Projects\yolo_editor\yolo_editor\ui\merge_designer\canvas.py", line 262, in _recalc_all_targets
+    for blk in node.blocks:
+               ^^^^^^^^^^^
+AttributeError: 'bool' object has no attribute 'blocks'
+:
+  File "C:\Users\Srijon\Documents\Projects\yolo_editor\yolo_editor\ui\merge_designer\canvas.py", line 455, in keyPressEvent
+    self.canvas.delete_selection()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Srijon\Documents\Projects\yolo_editor\yolo_editor\ui\merge_designer\canvas.py", line 323, in delete_selection
+    self._remove_target(tid)
+    ~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\Srijon\Documents\Projects\yolo_editor\yolo_editor\ui\merge_designer\canvas.py", line 349, in _remove_target
+    self._recalc_all_targets()
+    ~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\Srijon\Documents\Projects\yolo_editor\yolo_editor\ui\merge_designer\canvas.py", line 262, in _recalc_all_targets
+    for blk in node.blocks:
+               ^^^^^^^^^^^
+AttributeError: 'bool' object has no attribute 'blocks'
+ Python 3.11
         py -3.11 -m venv .venv-build
         .\.venv-build\Scripts\Activate.ps1
         pip install --upgrade pip

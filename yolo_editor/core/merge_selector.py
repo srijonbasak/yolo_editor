@@ -7,6 +7,9 @@ from typing import Dict, List, Set, Tuple, Optional
 from .merge_model import MergePlan, BalanceMode, EdgeKey
 from .yolo_io import parse_label_file
 from .utils.hashing import stable_int_key
+from .utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 ImgKey = Tuple[str, Path]  # (dataset_id, image_path)
 
@@ -34,12 +37,15 @@ def build_edge_index(plan: MergePlan, sources) -> Dict[int, List[EdgeGroup]]:
                 rows = parse_label_file(repo.label_path_for(img))
                 for (src_cls, x, y, w, h) in rows:
                     tgt = plan.mapping.get((ds.id, src_cls), None)
-                    if tgt is None: 
+                    if tgt is None:
+                        logger.debug(f"Skipping unmapped class {src_cls} in dataset {ds.id}")
                         continue
                     per_edge_imgs[(ds.id, src_cls, tgt)].add((ds.id, img))
+    logger.info(f"Built edge index: {dict(per_edge_imgs)}")
     per_target: Dict[int, List[EdgeGroup]] = defaultdict(list)
     for (dsid, src_cls, tgt), imgs in per_edge_imgs.items():
         per_target[tgt].append(EdgeGroup(edge=(dsid, src_cls), target=tgt, images=list(imgs)))
+    logger.info(f"Per target groups: { {t: len(groups) for t, groups in per_target.items()} }")
     return per_target
 
 def select_with_quotas(plan: MergePlan, per_target: Dict[int, List[EdgeGroup]]) -> SelectionResult:
@@ -50,6 +56,7 @@ def select_with_quotas(plan: MergePlan, per_target: Dict[int, List[EdgeGroup]]) 
     preview_edges: Dict[int, List[Tuple[EdgeKey,int,int]]] = defaultdict(list)
     warnings: List[str] = []
 
+    logger.info(f"Starting selection for targets: {list(per_target.keys())}")
     for tgt, groups in per_target.items():
         supplies: List[Tuple[EdgeGroup, List[ImgKey]]] = []
         for g in groups:
@@ -62,8 +69,10 @@ def select_with_quotas(plan: MergePlan, per_target: Dict[int, List[EdgeGroup]]) 
         total_supply = sum(len(imgs) for _, imgs in supplies)
         quota = plan.target_quota.get(tgt, total_supply)
         preview_supply[tgt] = {"supply": total_supply, "quota": quota, "selected": 0}
+        logger.info(f"Target {tgt}: supply={total_supply}, quota={quota}, groups={len(supplies)}")
         if total_supply == 0:
             warnings.append(f"Target {tgt}: no available images after mapping/limits.")
+            logger.warning(f"Target {tgt} has no supply")
             continue
 
         K = len(supplies)
@@ -113,9 +122,11 @@ def select_with_quotas(plan: MergePlan, per_target: Dict[int, List[EdgeGroup]]) 
             preview_edges[tgt].append((g.edge, len(imgs), taken))
 
         preview_supply[tgt]["selected"] = taken_total
+        logger.info(f"Target {tgt}: selected {taken_total}/{quota}")
         if taken_total < quota:
             warnings.append(f"Target {tgt}: selected {taken_total}/{quota} (supply/limits).")
 
+    logger.info(f"Final by_target counts: { {t: len(v) for t, v in by_target.items()} }")
     return SelectionResult(
         selected_images=selected,
         by_target=by_target,

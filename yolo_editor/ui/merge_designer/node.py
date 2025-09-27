@@ -120,17 +120,18 @@ class NodeItem(QGraphicsRectItem):
         self.relayout()
         return blk
 
-    def enable_plus(self, on_click: Callable[[], None]):
+    def enable_plus(self, on_click: Optional[Callable[[], None]]):
         if self.kind != "target":
             return
         if self._plus_proxy is not None:
             self.scene().removeItem(self._plus_proxy)
             self._plus_proxy = None
-        btn = QPushButton("+ Add target class")
-        btn.clicked.connect(on_click)
-        btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        self._plus_proxy = QGraphicsProxyWidget(self)
-        self._plus_proxy.setWidget(btn)
+        if on_click is not None:
+            btn = QPushButton("+ Add target class")
+            btn.clicked.connect(lambda checked=False: on_click())
+            btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            self._plus_proxy = QGraphicsProxyWidget(self)
+            self._plus_proxy.setWidget(btn)
         self.relayout()
 
     def relayout(self):
