@@ -49,12 +49,9 @@ class ClassBlock(QGraphicsRectItem):
         self.setAcceptHoverEvents(True)
         self._layout()
 
-        # port
+        # port anchored after layout
         self.port = Port(self, role=role, key=key)
-        if role == "source":
-            self.port.setPos(6, h / 2)
-        else:
-            self.port.setPos(w - 6, h / 2)
+        self._update_port_position()
 
     def set_subtext(self, s: str):
         self.subtitle.setText(s)
@@ -67,6 +64,16 @@ class ClassBlock(QGraphicsRectItem):
     def _layout(self):
         self.title.setPos(10, 6)
         self.subtitle.setPos(10, 6 + 16)
+        self._update_port_position()
+
+    def _update_port_position(self):
+        r = self.rect()
+        y = r.height() / 2
+        if self.role == "target":
+            x = 6
+        else:
+            x = 6
+        self.port.setPos(x, y)
 
     def mouseDoubleClickEvent(self, event):
         if self._on_double_click:
@@ -128,8 +135,11 @@ class NodeItem(QGraphicsRectItem):
             self._plus_proxy = None
         if on_click is not None:
             btn = QPushButton("+ Add target class")
-            btn.clicked.connect(lambda checked=False: on_click())
+            btn.setFixedHeight(28)
             btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            btn.clicked.connect(lambda checked=False: on_click())
+            btn.setStyleSheet("text-align: left; padding-left: 8px;")
+            btn.clicked.connect(lambda checked=False: on_click())
             self._plus_proxy = QGraphicsProxyWidget(self)
             self._plus_proxy.setWidget(btn)
         self.relayout()
@@ -137,6 +147,12 @@ class NodeItem(QGraphicsRectItem):
     def relayout(self):
         # place blocks vertically under header
         y = 32
+        if self.kind == "target" and self._plus_proxy is not None:
+            widget = self._plus_proxy.widget()
+            if widget:
+                widget.setFixedWidth(int(self.width - 12))
+            self._plus_proxy.setPos(6, y)
+            y += (widget.height() if widget else 28) + 8
         for blk in self.blocks:
             blk.setParentItem(self)
             blk.setPos(4, y)
@@ -145,8 +161,6 @@ class NodeItem(QGraphicsRectItem):
         h = max(60, y + 6)
         self.setRect(0, 0, self.width, h)
         self.header.setRect(0, 0, self.width, 28)
-        if self._plus_proxy is not None:
-            self._plus_proxy.setPos(6, h - 34)
 
     # Context menu hook (node removal is handled by canvas)
     def contextMenuEvent(self, event):

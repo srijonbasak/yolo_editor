@@ -138,7 +138,7 @@ class _StatsWorker(QObject):
             images_no_labels = []
             for idx, img_path in enumerate(self._images, start=1):
                 if self._cancelled:
-                    self.finished.emit({}, {}, max_cls, True, {})
+                    self.finished.emit({}, {}, max_cls, True, {}, images_no_labels)
                     return
                 boxes = read_yolo_txt(labels_for_image(img_path, self._labels_dir, self._images_dir))
                 if not boxes:
@@ -171,7 +171,7 @@ class _StatsWorker(QObject):
                     per_imgs[cls] += 1
                 self.progress.emit(idx, total)
             if self._cancelled:
-                self.finished.emit({}, {}, max_cls, True, {}, [])
+                self.finished.emit({}, {}, max_cls, True, {}, images_no_labels)
                 return
             folder_payload = {}
             for folder, info in folder_data.items():
@@ -431,7 +431,10 @@ class MainWindow(QMainWindow):
 
     def _teardown_stats_thread(self):
         if self._stats_worker is not None:
-            self._stats_worker.progress.disconnect(self._on_stats_progress)
+            try:
+                self._stats_worker.progress.disconnect(self._on_stats_progress)
+            except (TypeError, RuntimeError):
+                pass
             self._stats_worker.deleteLater()
             self._stats_worker = None
         if self._stats_dialog is not None:
@@ -656,18 +659,14 @@ class MainWindow(QMainWindow):
         if img is None:
             self.statusBar().showMessage(f"Failed to load: {img_path.name}", 4000)
             return
+        self._ensure_image_size(img_path, img)
         self.view.show_image_bgr(img_path, img)
-        core_boxes = self._label_cache.get(img_path)
-        if core_boxes is None:
-            core_boxes = read_yolo_txt(labels_for_image(img_path, self.labels_dir, self.images_dir))
-            self._label_cache[img_path] = core_boxes
-            class_set = {b.cls for b in core_boxes}
-            self._image_class_sets[img_path] = class_set
-            if core_boxes:
-                new_max = max(b.cls for b in core_boxes)
-                if new_max > self._max_class_id:
-                    self._max_class_id = new_max
-                    self._ensure_class_combo_capacity(new_max)
+        core_boxes = self._get_or_load_boxes(img_path, self.labels_dir, self.images_dir, notify=True)
+        if core_boxes:
+            new_max = max(b.cls for b in core_boxes)
+            if new_max > self._max_class_id:
+                self._max_class_id = new_max
+                self._ensure_class_combo_capacity(new_max)
         self.view.clear_boxes()
         view_boxes = [ViewBox(cls=b.cls, cx=b.cx, cy=b.cy, w=b.w, h=b.h) for b in core_boxes]
         for vb in view_boxes:
@@ -683,16 +682,23 @@ class MainWindow(QMainWindow):
         txt = labels_for_image(img_path, self.labels_dir, self.images_dir)
         view_boxes = self.view.get_boxes_as_norm()
         core_boxes = [Box(int(b.cls), b.cx, b.cy, b.w, b.h) for b in view_boxes]
-        write_yolo_txt(txt, core_boxes)
-        self._label_cache[img_path] = core_boxes
-        class_set = {b.cls for b in core_boxes}
+        sanitized, changed = self._sanitize_boxes_for_image(img_path, core_boxes)
+        if changed:
+            self._notify_box_adjustment(img_path)
+        write_yolo_txt(txt, sanitized)
+        self._label_cache[img_path] = sanitized
+        class_set = {b.cls for b in sanitized}
         self._image_class_sets[img_path] = class_set
         if class_set:
             new_max = max(class_set)
             if new_max > self._max_class_id:
                 self._max_class_id = new_max
                 self._ensure_class_combo_capacity(new_max)
-        self._fill_table(view_boxes)
+        self.view.clear_boxes()
+        sanitized_view = [ViewBox(cls=b.cls, cx=b.cx, cy=b.cy, w=b.w, h=b.h) for b in sanitized]
+        for vb in sanitized_view:
+            self.view.add_box_norm(vb)
+        self._fill_table(sanitized_view)
         self.statusBar().showMessage(f"Saved: {txt}", 4000)
         self._compute_stats_and_show()
 
@@ -829,7 +835,11 @@ class MainWindow(QMainWindow):
                 boxes = self._label_cache.get(img)
                 if boxes is None:
                     boxes = read_yolo_txt(labels_for_image(img, labels_dir, images_dir))
+                    boxes, changed = self._sanitize_boxes_for_image(img, boxes)
+                    if changed:
+                        self._notify_box_adjustment(img)
                     self._label_cache[img] = boxes
+                    self._image_class_sets[img] = {b.cls for b in boxes}
                 if boxes:
                     new_max = max(b.cls for b in boxes)
                     if new_max > self._max_class_id:
@@ -984,7 +994,7 @@ class MainWindow(QMainWindow):
         fallback_label = ""
         fallback_enabled = False
         dataset_sources = self.merge_ctrl.model.sources.get(dataset_id, [])
-        mapped_source_ids = set(dataset_mapping_old.keys())
+        mapped_source_ids = set(dataset_mapping.keys())
         unmapped_sources = [src for src in dataset_sources if src.class_id not in mapped_source_ids]
         if unmapped_sources:
             msg = "The following source classes are not mapped and will be dropped:\n" + "\n".join(f"  {src.class_name} ({src.class_id})" for src in unmapped_sources)
@@ -1087,7 +1097,12 @@ class MainWindow(QMainWindow):
 
                     src_txt = labels_for_image(img_path, labels_dir, images_dir)
                     boxes = read_yolo_txt(src_txt)
+                    boxes, changed = self._sanitize_boxes_for_image(img_path, boxes)
+                    if changed:
+                        record["notes"].append("Adjusted extremely small boxes during analysis")
                     image_boxes_cache[img_path] = boxes
+                    self._label_cache[img_path] = boxes
+                    self._image_class_sets[img_path] = {b.cls for b in boxes}
                     label_rel = _label_relative_path(src_txt, labels_dir, rel_img)
 
                     record = {
@@ -1251,7 +1266,12 @@ class MainWindow(QMainWindow):
             if boxes is None:
                 src_txt = labels_for_image(img_path, labels_dir, images_dir)
                 boxes = read_yolo_txt(src_txt)
-                image_boxes_cache[img_path] = boxes
+            boxes, changed = self._sanitize_boxes_for_image(img_path, boxes)
+            if changed:
+                record.setdefault("notes", []).append("Adjusted extremely small boxes before export")
+            image_boxes_cache[img_path] = boxes
+            self._label_cache[img_path] = boxes
+            self._image_class_sets[img_path] = {b.cls for b in boxes}
 
             boxes_by_target: dict[int, List[Box]] = {}
             per_target_sources: dict[int, set[int]] = {}
