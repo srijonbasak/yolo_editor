@@ -278,16 +278,27 @@ class MergeCanvas(QWidget):
     def _recalc_all_targets(self):
         stale_ids = []
         for tid, node in list(self.target_nodes.items()):
-            if not isinstance(node, NodeItem):
+            # Ensure node is actually a NodeItem instance
+            if not hasattr(node, 'blocks') or not isinstance(node, NodeItem):
                 stale_ids.append(tid)
                 continue
-            for blk in node.blocks:
-                if blk.role == "target" and blk.key == tid:
-                    blk.set_title(self._target_block_title(tid))
-                    blk.set_subtext(self._target_subtext(tid))
-            node.relayout()
+            
+            # Safely iterate through blocks
+            if hasattr(node, 'blocks') and node.blocks:
+                for blk in node.blocks:
+                    if hasattr(blk, 'role') and hasattr(blk, 'key') and blk.role == "target" and blk.key == tid:
+                        blk.set_title(self._target_block_title(tid))
+                        blk.set_subtext(self._target_subtext(tid))
+            
+            # Safely call relayout
+            if hasattr(node, 'relayout'):
+                node.relayout()
+        
+        # Clean up stale references
         for tid in stale_ids:
             self.target_nodes.pop(tid, None)
+        
+        # Update edge tooltips
         for edge in self.edge_items.values():
             self._update_edge_tooltip(edge)
 
@@ -326,10 +337,19 @@ class MergeCanvas(QWidget):
                             dataset_id = k
                             self.nodes.pop(k)
                             break
-                    ports: List[Port] = [blk.port for blk in it.blocks]
+                    
+                    # Safely get ports from blocks
+                    ports: List[Port] = []
+                    if hasattr(it, 'blocks') and it.blocks:
+                        for blk in it.blocks:
+                            if hasattr(blk, 'port'):
+                                ports.append(blk.port)
+                    
+                    # Remove edges connected to these ports
                     for edge in list(self.edge_items.values()):
                         if getattr(edge, "src_item", None) in ports or getattr(edge, "dst_item", None) in ports:
                             self._delete_edge_item(edge)
+                    
                     if dataset_id:
                         self.dataset_placeholders.pop(dataset_id, None)
                         self.ctrl.remove_dataset(dataset_id)
@@ -339,8 +359,10 @@ class MergeCanvas(QWidget):
                                 edge = self.edge_items.pop(key)
                                 if edge.scene():
                                     edge.scene().removeItem(edge)
+                    
                     if it.scene():
                         it.scene().removeItem(it)
+                        
                 elif it.kind == "target":
                     target_ids = [tid for tid, node in list(self.target_nodes.items()) if node is it]
                     for tid in target_ids:
@@ -349,27 +371,36 @@ class MergeCanvas(QWidget):
 
     def _remove_target(self, target_id: int):
         node = self.target_nodes.pop(target_id, None)
-        if not isinstance(node, NodeItem):
+        if not isinstance(node, NodeItem) or not hasattr(node, 'blocks'):
             return
+        
         # disconnect + remove edges pointing to this target
         for edge_key, edge in list(self.edge_items.items()):
-            if edge.target_id == target_id:
+            if hasattr(edge, 'target_id') and edge.target_id == target_id:
                 self._delete_edge_item(edge)
+        
         self.ctrl.remove_target_class(target_id)
-        removed_block = None
-        for blk in list(node.blocks):
-            if blk.role == "target" and blk.key == target_id:
-                removed_block = blk
-                node.blocks.remove(blk)
-                if blk.scene():
-                    blk.scene().removeItem(blk)
-        node.relayout()
-        if not any(blk.role == "target" for blk in node.blocks):
+        
+        # Safely remove blocks
+        if node.blocks:
+            for blk in list(node.blocks):
+                if hasattr(blk, 'role') and hasattr(blk, 'key') and blk.role == "target" and blk.key == target_id:
+                    node.blocks.remove(blk)
+                    if blk.scene():
+                        blk.scene().removeItem(blk)
+        
+        # Safely relayout
+        if hasattr(node, 'relayout'):
+            node.relayout()
+        
+        # Remove node if no target blocks remain
+        if not any(hasattr(blk, 'role') and blk.role == "target" for blk in node.blocks):
             if node.scene():
                 node.scene().removeItem(node)
             for tid in list(self.target_nodes.keys()):
                 if self.target_nodes.get(tid) is node:
                     self.target_nodes.pop(tid, None)
+        
         self._recalc_all_targets()
 
     # ---------- CONTEXT ----------

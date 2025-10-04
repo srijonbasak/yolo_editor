@@ -100,7 +100,32 @@ def labels_for_image(img_path: Path, labels_dir: Optional[Path], images_dir: Opt
     else:
         rel_path = Path(img_path.name)
 
-    return (labels_dir / rel_path).with_suffix(".txt")
+    rel_parts = rel_path.parts
+    rel_candidates: List[Path] = []
+    if rel_parts:
+        rel_candidates.append(rel_path)
+        for idx in range(1, len(rel_parts)):
+            remainder = Path(*rel_parts[idx:])
+            if remainder.parts:
+                rel_candidates.append(remainder)
+    name_only = Path(img_path.name)
+    if name_only not in rel_candidates:
+        rel_candidates.append(name_only)
+
+    chosen: Optional[Path] = None
+    seen: set[str] = set()
+    for rel in rel_candidates:
+        candidate = (labels_dir / rel).with_suffix(".txt")
+        key = str(candidate).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.exists():
+            return candidate
+        if chosen is None:
+            chosen = candidate
+
+    return chosen or (labels_dir / name_only).with_suffix(".txt")
 
 
 # ---------------- YAML ----------------

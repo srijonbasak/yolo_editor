@@ -22,18 +22,56 @@ class DatasetModel:
         return any(v["images"] for v in self.splits.values())
 
 
+def _case_insensitive_dir(root: Optional[Path], name: str) -> Optional[Path]:
+    if root is None:
+        return None
+    try:
+        entries = list(root.iterdir())
+    except (FileNotFoundError, PermissionError, NotADirectoryError):
+        return None
+    target = name.lower()
+    for entry in entries:
+        if entry.is_dir() and entry.name.lower() == target:
+            return entry
+    return None
+
+
 def _guess_labels(images_dir: Path) -> Optional[Path]:
-    # a) <split>/images -> <split>/labels
-    if images_dir.name == "images":
-        cand = images_dir.parent / "labels"
-        if cand.exists(): return cand
-    # b) <root>/images/<split> -> <root>/labels/<split>
-    if images_dir.parent.name == "images":
-        cand = images_dir.parent.parent / "labels" / images_dir.name
-        if cand.exists(): return cand
-    # c) <split>/ -> <split>/labels
-    cand = images_dir / "labels"
-    if cand.exists(): return cand
+    """Attempt to locate a labels folder for the given images directory."""
+    name_lower = images_dir.name.lower()
+    parent = images_dir.parent if images_dir else None
+
+    # a) <split>/images -> <split>/labels (case-insensitive)
+    if name_lower == "images":
+        cand = _case_insensitive_dir(parent, "labels")
+        if cand:
+            return cand
+
+    # b) <root>/images/<split> -> <root>/labels/<split> (or shared labels root)
+    if parent and parent.name.lower() == "images":
+        labels_root = _case_insensitive_dir(parent.parent, "labels")
+        if labels_root:
+            specific = _case_insensitive_dir(labels_root, images_dir.name)
+            return specific or labels_root
+
+    # c) <split>/ -> <split>/labels (case-insensitive)
+    cand = _case_insensitive_dir(images_dir, "labels")
+    if cand:
+        return cand
+
+    # d) <split>/<images> with sibling labels/** layout
+    sibling = _case_insensitive_dir(parent, "labels") if parent else None
+    if sibling:
+        specific = _case_insensitive_dir(sibling, images_dir.name)
+        return specific or sibling
+
+    # e) Shared labels folder one level up (flattened labels)
+    if parent:
+        upper = _case_insensitive_dir(parent.parent, "labels")
+        if upper:
+            specific = _case_insensitive_dir(upper, images_dir.name)
+            return specific or upper
+
     return None
 
 
