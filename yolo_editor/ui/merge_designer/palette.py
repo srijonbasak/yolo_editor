@@ -38,11 +38,14 @@ class MergePalette(QWidget):
 
         lay.addWidget(QLabel("Datasets"))
         self.list = QListWidget()
+        self.list.itemSelectionChanged.connect(self._update_buttons)
+        self.list.itemDoubleClicked.connect(lambda *_: self._spawn_selected_dataset())
         lay.addWidget(self.list)
 
         btn_row = QHBoxLayout()
         self.btn_add_ds = QPushButton("Add to Canvas")
         self.btn_add_ds.clicked.connect(self._spawn_selected_dataset)
+        self.btn_add_ds.setEnabled(False)
         btn_row.addWidget(self.btn_add_ds)
         lay.addLayout(btn_row)
 
@@ -67,8 +70,12 @@ class MergePalette(QWidget):
         self.list.clear()
         for n in dataset_names:
             QListWidgetItem(n, self.list)
+        self._update_buttons()
 
     # callbacks
+    def _update_buttons(self):
+        self.btn_add_ds.setEnabled(self.list.currentItem() is not None)
+
     def _spawn_selected_dataset(self):
         it = self.list.currentItem()
         if not it:

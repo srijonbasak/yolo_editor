@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Dict, Optional, Tuple, List
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QGraphicsView, QMenu, QInputDialog, QHBoxLayout, QPushButton
-from PySide6.QtGui import QPainter, QWheelEvent, QAction
+from PySide6.QtGui import QPainter, QWheelEvent, QAction, QColor
 from PySide6.QtCore import Qt, QPointF
 
 from .scene import MergeScene
@@ -37,6 +37,9 @@ class MergeCanvas(QWidget):
         lay.addLayout(zoom_lay)
 
         self.view = _GraphicsView(self)
+        self.view.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        self.view.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        self.view.setBackgroundBrush(QColor("#F1F5F9"))
         self.scene = MergeScene(self)
         self.view.setScene(self.scene)
         lay.addWidget(self.view)
@@ -84,7 +87,7 @@ class MergeCanvas(QWidget):
                 subtext="Scanning dataset...",
                 role="source",
                 key=(dataset_id, None),
-                color="#f0f0f0",
+                color="#E2E8F0",
             )
             self.dataset_placeholders[dataset_id] = placeholder
 
@@ -113,7 +116,7 @@ class MergeCanvas(QWidget):
                     subtext="Scanning dataset...",
                     role="source",
                     key=(dataset_id, None),
-                    color="#f0f0f0",
+                    color="#E2E8F0",
                 )
                 self.dataset_placeholders[dataset_id] = placeholder
             else:
@@ -171,7 +174,7 @@ class MergeCanvas(QWidget):
                 subtext=msg,
                 role="source",
                 key=(dataset_id, None),
-                color="#ffeaea",
+                color="#FEE2E2",
             )
             self.dataset_placeholders[dataset_id] = placeholder
         else:
@@ -193,7 +196,7 @@ class MergeCanvas(QWidget):
             subtext=sub,
             role="target",
             key=target_id,
-            color="#f7fff0",
+            color="#E7F9ED",
             on_double_click=lambda tid=target_id: self._edit_target(tid),
             context_menu_factory=make_menu
         )
@@ -421,6 +424,10 @@ class MergeCanvas(QWidget):
             act.triggered.connect(lambda checked=False, edge=item: (edge.setSelected(True), self._delete_edge_item(edge)))
             m.addAction(act)
         if isinstance(item, NodeItem):
+            if getattr(item, 'kind', '') == 'target':
+                act_add = QAction("Add target class...", self)
+                act_add.triggered.connect(lambda checked=False, node=item: self._on_plus_new_target(node))
+                m.addAction(act_add)
             actn = QAction("Remove node", self)
             actn.triggered.connect(lambda checked=False, node=item: (node.setSelected(True), self.delete_selection()))
             m.addAction(actn)
@@ -432,6 +439,11 @@ class MergeCanvas(QWidget):
         act_edit = QAction("Edit target...", menu)
         act_edit.triggered.connect(lambda checked=False, tid=target_id: self._edit_target(tid))
         menu.addAction(act_edit)
+        node = self.target_nodes.get(target_id)
+        if node is not None:
+            act_add = QAction("Add target class...", menu)
+            act_add.triggered.connect(lambda checked=False, n=node: self._on_plus_new_target(n))
+            menu.addAction(act_add)
         act_remove = QAction("Remove target", menu)
         act_remove.triggered.connect(lambda checked=False, tid=target_id: self._remove_target(tid))
         menu.addAction(act_remove)

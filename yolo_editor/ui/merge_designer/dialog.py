@@ -376,10 +376,9 @@ class MergeDesignerDialog(QDialog):
             self.ed_output.setText(d)
 
     def _on_merge(self):
+        self._on_preview()
         if not self._last_preview:
-            self._on_preview()
-            if not self._last_preview:
-                return
+            return
 
         plan = self._build_plan(); 
         if not plan: return
